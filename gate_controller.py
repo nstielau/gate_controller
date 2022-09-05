@@ -28,3 +28,6 @@ def button_callback(channel):
     GPIO.output(LED_PIN, False)
 
 GPIO.add_event_detect(BUTTON_PIN, GPIO.RISING, callback=button_callback) # Setup event on pin rising edge
+
+while True:
+    time.sleep(1)
