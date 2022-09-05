@@ -1,4 +1,4 @@
-FROM balenalib/raspberrypi3-python:3.10-bookworm-build
+FROM balenalib/raspberrypi3-python:3.10-bullseye-build
 
 ENV VERSION=1.0.0
 RUN python --version
