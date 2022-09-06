@@ -18,7 +18,7 @@ LED_PIN=8
 
 # Configure the board
 GPIO.setmode(GPIO.BOARD) # Use Board numbers https://pinout.xyz/
-GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(LED_PIN, GPIO.OUT)
 GPIO.setwarnings(False)
 
