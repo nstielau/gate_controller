@@ -25,12 +25,11 @@ GPIO.setwarnings(False)
 def button_callback(channel):
     logger.info("Button was pushed!")
     GPIO.output(LED_PIN, True)
-    time.sleep(0.2)    
+    while GPIO.input(BUTTON_PIN):
+        time.sleep(0.2)
     GPIO.output(LED_PIN, False)
 
-GPIO.add_event_detect(BUTTON_PIN, GPIO.RISING, callback=button_callback) # Setup event on pin rising edge
+GPIO.add_event_detect(BUTTON_PIN, GPIO.RISING, callback=button_callback, bouncetime=300) # Setup event on pin rising edge
 
 while True:
-    GPIO.output(LED_PIN, True)
-    time.sleep(0.2)    
-    GPIO.output(LED_PIN, False)
+    time.sleep(3)
