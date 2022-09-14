@@ -3,6 +3,8 @@ import os
 import time
 import sys
 
+from threading import Timer
+
 import RPi.GPIO as GPIO
 
 LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
@@ -10,26 +12,41 @@ LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 logging.basicConfig(stream=sys.stdout, level=LOGLEVEL)
-logger.debug("Debug test")
-logger.info("Info test")
+# logger.debug("Debug test")
+# logger.info("Info test")
 
-BUTTON_PIN=40
 LED_PIN=8
 
 # Configure the board
 GPIO.setmode(GPIO.BOARD) # Use Board numbers https://pinout.xyz/
-GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+#GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(LED_PIN, GPIO.OUT)
 GPIO.setwarnings(False)
 
-def button_callback(channel):
-    logger.info("Button was pushed!")
-    GPIO.output(LED_PIN, True)
-    while GPIO.input(BUTTON_PIN):
-        time.sleep(0.2)
-    GPIO.output(LED_PIN, False)
+class GateController():
+    def _init_(self):
+        self.connected = False
 
-GPIO.add_event_detect(BUTTON_PIN, GPIO.RISING, callback=button_callback, bouncetime=300) # Setup event on pin rising edge
+    def open(self, hold=1):
+        logger.info("Triggering open")
+        self._connect_exit()
+        Timer(hold, self._disconnect_exit).start()
 
-while True:
-    time.sleep(3)
+    def is_connected(self):
+        return self.connected
+
+    def _connect_exit(self):
+        logger.info("Connecting")
+        self.connected = True
+        GPIO.output(LED_PIN, True)
+
+    def _disconnect_exit(self):
+        logger.info("Disonnecting")
+        self.connected = False
+        GPIO.output(LED_PIN, False)
+
+if __name__ == '__main__':
+    while True:
+        logger.info("Opening for 5 seconds, sleeping for 10")
+        GateController().open(5)
+        time.sleep(10)     
