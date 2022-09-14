@@ -3,7 +3,7 @@ import logging
 import os
 import sys
 
-from screenlogic.screenlogic import slBridge    
+from gate_controller import GateController
 
 from bottle import route, run, template, request
 
@@ -31,27 +31,9 @@ skill_builder = SkillBuilder()
 
 @skill_builder.request_handler(can_handle_func=is_request_type("LaunchRequest"))
 def launch_request_handler(handler_input):
-    speech_text = "Pool party time"
+    speech_text = "Opening the gate"
 
-    handler_input.response_builder.speak(speech_text).set_card(
-        SimpleCard(speech_text, speech_text)).set_should_end_session(False)
-    return handler_input.response_builder.response
-
-@skill_builder.request_handler(can_handle_func=is_intent_name("StartSwimJetIntent"))
-def start_swimjet_intent_handler(handler_input):
-    speech_text = "Pool jet started"
-
-    slBridge(True).setCircuit(502, 1)
-
-    handler_input.response_builder.speak(speech_text).set_card(
-        SimpleCard(speech_text, speech_text)).set_should_end_session(True)
-    return handler_input.response_builder.response
-
-@skill_builder.request_handler(can_handle_func=is_intent_name("StopSwimJetIntent"))
-def stop_swimjet_intent_handler(handler_input):
-    speech_text = "Pool jet stopped"
-
-    slBridge(True).setCircuit(502, 0)
+    GateController().open()
 
     handler_input.response_builder.speak(speech_text).set_card(
         SimpleCard(speech_text, speech_text)).set_should_end_session(True)
@@ -63,11 +45,10 @@ def stop_swimjet_intent_handler(handler_input):
         is_intent_name("AMAZON.StopIntent")(handler_input))
 def cancel_and_stop_intent_handler(handler_input):
     # type: (HandlerInput) -> Response
-    speech_text = "Party on!"
+    speech_text = "Cancelling!"
 
     handler_input.response_builder.speak(speech_text).set_card(
-        SimpleCard("Party on", speech_text)).set_should_end_session(
-            True)
+        SimpleCard(speech_text, speech_text)).set_should_end_session(True)
     return handler_input.response_builder.response
 
 @skill_builder.exception_handler(can_handle_func=lambda i, e: True)
@@ -95,7 +76,17 @@ def pretty_print_json(json_data):
 #####################################################################
 @route('/', method=['GET'])
 def index():
-    return "hello"
+    return "I'm a gate!"
+
+@route('/open', method=['POST'])
+def index():
+    try:
+        hold_secs = request.body.read().decode()
+        GateController().open(int(hold_secs))
+        return "Opened for " + str(hold_secs) + " seconds"
+    except:
+        GateController().open()
+        return "Opened gate"
 
 @route('/', method=['POST'])
 def index():
