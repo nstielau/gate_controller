@@ -23,7 +23,7 @@ GPIO.setup(LED_PIN, GPIO.OUT)
 GPIO.setwarnings(False)
 
 class GateController():
-    def _init_(self):
+    def __init__(self):
         self._connected = False
         self._timer = None
 
