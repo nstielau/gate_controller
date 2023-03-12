@@ -34,7 +34,7 @@ class GateController():
         self._timer.start()
 
     def is_connected(self):
-        return self.connected
+        return self._connected
 
     def close(self):
         logger.info("Triggering close")
