@@ -5,7 +5,7 @@ import sys
 
 from gate_controller import GateController
 
-from bottle import route, run, template, request
+from bottle import route, run, template, request, response
 
 from ask_sdk_core.skill_builder import SkillBuilder
 from ask_sdk_webservice_support.webservice_handler import WebserviceSkillHandler
