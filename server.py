@@ -22,6 +22,9 @@ logging.basicConfig(stream=sys.stdout, level=LOGLEVEL)
 logger.debug("Debug test")
 logger.info("Info test")
 
+
+gate_controller = GateController()
+
 #####################################################################
 #####################################################################
 # Handlers
@@ -33,7 +36,7 @@ skill_builder = SkillBuilder()
 def launch_request_handler(handler_input):
     speech_text = "Opening the gate"
 
-    GateController().open()
+    gate_controller.open()
 
     handler_input.response_builder.speak(speech_text).set_card(
         SimpleCard(speech_text, speech_text)).set_should_end_session(True)
@@ -76,17 +79,29 @@ def pretty_print_json(json_data):
 #####################################################################
 @route('/', method=['GET'])
 def index():
-    return "I'm a gate!"
+    return {"messsage": "I'm a gate!"}
+
+@route('/open', method=['GET'])
+def index():
+    response.set_header('Access-Control-Allow-Origin', '*')
+    response.add_header('Access-Control-Allow-Methods', 'GET, POST')
+    return {"connected": gate_controller.is_connected()}
 
 @route('/open', method=['POST'])
 def index():
+    response.set_header('Access-Control-Allow-Origin', '*')
+    response.add_header('Access-Control-Allow-Methods', 'GET, POST')
     try:
         hold_secs = request.body.read().decode()
-        GateController().open(int(hold_secs))
-        return "Opened for " + str(hold_secs) + " seconds"
+        gate_controller.open(int(hold_secs))
+        return {
+            "message": "Opened for " + str(hold_secs) + " seconds"
+        }
     except:
-        GateController().open()
-        return "Opened gate"
+        gate_controller.open()
+        return {
+            "message": "Opened Gate"
+        }
 
 @route('/', method=['POST'])
 def index():
