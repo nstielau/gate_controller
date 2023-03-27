@@ -87,7 +87,7 @@ def index():
     response.add_header('Access-Control-Allow-Methods', 'GET, POST, DELETE')
     gate_controller.cancel_hold()
     return {
-        "message": "Cancelled hold"
+        "message": "Cancelled hold",
         "connected": gate_controller.is_held()
     }
 
