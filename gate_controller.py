@@ -15,11 +15,11 @@ logging.basicConfig(stream=sys.stdout, level=LOGLEVEL)
 # logger.debug("Debug test")
 # logger.info("Info test")
 
-LED_PIN=8
+GATE_PIN=8
 
 # Configure the board
 GPIO.setmode(GPIO.BOARD) # Use Board numbers https://pinout.xyz/
-GPIO.setup(LED_PIN, GPIO.OUT)
+GPIO.setup(GATE_PIN, GPIO.OUT)
 GPIO.setwarnings(False)
 
 class GateController():
@@ -44,12 +44,12 @@ class GateController():
     def _connect_exit(self):
         logger.info("Connecting")
         self._connected = True
-        GPIO.output(LED_PIN, True)
+        GPIO.output(GATE_PIN, True)
 
     def _disconnect_exit(self):
         logger.info("Disonnecting")
         self._connected = False
-        GPIO.output(LED_PIN, False)
+        GPIO.output(GATE_PIN, False)
 
 if __name__ == '__main__':
     while True:
