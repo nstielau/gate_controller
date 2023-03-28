@@ -78,11 +78,11 @@ def pretty_print_json(json_data):
 # Webserver
 #####################################################################
 @route('/', method=['GET'])
-def index():
+def get_index():
     return {"messsage": "I'm a gate!"}
 
 @route('/hold', method=['DELETE'])
-def index():
+def delete_hold():
     response.set_header('Access-Control-Allow-Origin', '*')
     response.add_header('Access-Control-Allow-Methods', 'GET, POST, DELETE')
     gate_controller.cancel_hold()
@@ -92,13 +92,13 @@ def index():
     }
 
 @route('/hold', method=['GET'])
-def index():
+def get_hold():
     response.set_header('Access-Control-Allow-Origin', '*')
     response.add_header('Access-Control-Allow-Methods', 'GET, POST, DELETE')
     return {"connected": gate_controller.is_held()}
 
 @route('/hold', method=['POST'])
-def index():
+def post_hold():
     response.set_header('Access-Control-Allow-Origin', '*')
     response.add_header('Access-Control-Allow-Methods', 'GET, POST, DELETE')
     try:
@@ -114,7 +114,7 @@ def index():
         }
 
 @route('/open', method=['GET'])
-def index():
+def get_open():
     # DEPRECATED IN FAVOR OF /hold
     response.set_header('Access-Control-Allow-Origin', '*')
     response.add_header('Access-Control-Allow-Methods', 'GET, POST')
@@ -124,7 +124,7 @@ def index():
     }
 
 @route('/open', method=['POST'])
-def index():
+def post_open():
     # DEPRECATED IN FAVOR OF /hold
     response.set_header('Access-Control-Allow-Origin', '*')
     response.add_header('Access-Control-Allow-Methods', 'GET, POST')
@@ -141,7 +141,7 @@ def index():
         }
 
 @route('/', method=['POST'])
-def index():
+def post_index():
     body = request.body.read().decode()
     headers = request.headers
     logger.info(headers)
