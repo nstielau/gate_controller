@@ -81,10 +81,10 @@ def pretty_print_json(json_data):
 def get_index():
     return {"messsage": "I'm a gate!"}
 
-@route('/hold', method=['DELETE'])
+@route('/hold/cancel', method=['POST'])
 def delete_hold():
     response.set_header('Access-Control-Allow-Origin', '*')
-    response.add_header('Access-Control-Allow-Methods', 'GET, POST, DELETE')
+    response.add_header('Access-Control-Allow-Methods', 'GET, POST')
     gate_controller.cancel_hold()
     return {
         "message": "Cancelled hold",
@@ -94,13 +94,13 @@ def delete_hold():
 @route('/hold', method=['GET'])
 def get_hold():
     response.set_header('Access-Control-Allow-Origin', '*')
-    response.add_header('Access-Control-Allow-Methods', 'GET, POST, DELETE')
+    response.add_header('Access-Control-Allow-Methods', 'GET, POST')
     return {"connected": gate_controller.is_held()}
 
 @route('/hold', method=['POST'])
 def post_hold():
     response.set_header('Access-Control-Allow-Origin', '*')
-    response.add_header('Access-Control-Allow-Methods', 'GET, POST, DELETE')
+    response.add_header('Access-Control-Allow-Methods', 'GET, POST')
     try:
         hold_secs = request.body.read().decode()
         gate_controller.request_open(int(hold_secs))
