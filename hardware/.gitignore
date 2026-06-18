@@ -1,0 +1,20 @@
+# KiCad backup and temp files
+*.bak
+*.bck
+*-backups/
+*.kicad_pcb-bak
+*.sch-bak
+*~
+\#*
+_autosave-*
+*.tmp
+fp-info-cache
+*.dsn
+*.ses
+*.kicad_prl
+
+# KiCad 8 auto-generated
+*.kicad_dru
+
+# Gerber outputs (regenerate from source)
+gerbers/
