@@ -1,1 +1,6 @@
 __pycache__
+.env
+emqxsl-ca.crt
+.venv/
+.artifacts/
+settings.toml

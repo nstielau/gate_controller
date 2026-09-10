@@ -2,6 +2,12 @@
 
 Alexa-enabled driveway gate controller with custom FeatherWing PCB.
 
+The XIAO ESP32S3 CircuitPython app provides Wi-Fi provisioning and MQTT LED
+control. See [circuitpython/README.md](circuitpython/README.md) for setup,
+publishing, deployment, and hardware verification. Host dependencies are
+managed with `uv`; use `make setup`, `make test`, and `make deploy` from the
+repository root.
+
 ## Software
 
 Python server running on a Raspberry Pi (or Feather with WiFi) that controls
