@@ -1,12 +1,29 @@
 # XIAO ESP32S3 CircuitPython app
 
-This app provisions Wi-Fi, connects to EMQX with verified TLS, and controls
-the onboard active-low `board.LED` from MQTT commands. It targets CircuitPython
-10.x; this setup was tested on 10.3.0. The red charging indicator is separate.
+Wi-Fi provisioning, MQTT over verified TLS, and separate connection/hold
+indicators. Targets CircuitPython 10.x; tested on 10.3.0.
+
+| Output | Behavior |
+| --- | --- |
+| Onboard yellow LED | Blinks during startup and while Wi-Fi or MQTT is unavailable; solid ON when both are connected. |
+| D0 / GPIO1 external LED | LOW at boot; blinks four times per second while a hold is active. |
+| D10 / GPIO9 transistor control | LOW at boot; HIGH only for the requested hold duration. |
+
+D9 is unused. A hold command raises D10 and D0 together for its duration.
+The D0 LED reports the commanded transistor state, not sensed gate position.
+
+Wire **D0 → 1 kΩ resistor → LED anode (+); LED cathode (−) → XIAO GND**.
+See the [connection guide](../docs/xiao-breadboard.svg). D0 and D10 are board
+labels: **D0 is GPIO1**, and **D10 is GPIO9**. The red charging LED is separate.
+
+The onboard LED is active low and uses 500 ms transitions while disconnected.
+D0 uses 125 ms transitions, giving four complete on/off cycles per second.
+Both timers are independent of D10. Blocking Wi-Fi/TLS operations can briefly
+pause blinking, especially during connection attempts.
 
 ## Setup and deployment
 
-From the repository root, use **uv** for the host environment (Python 3.11+):
+From the repository root, use **uv** (Python 3.11+):
 
 ```sh
 make setup
@@ -14,139 +31,98 @@ make test
 make deploy
 ```
 
-`make setup` creates `.venv` and uses `uv pip sync` with
-`tools/requirements-dev.lock`. To refresh that lock after changing dependencies:
+Host dependencies are locked in `tools/requirements-dev.lock`. Refresh after
+changing dependencies with:
 
 ```sh
 uv pip compile tools/requirements-dev.txt -o tools/requirements-dev.lock
 ```
 
-Put the downloaded CA at `emqxsl-ca.crt` and MQTT login credentials in `.env`:
+Put the downloaded CA at ignored `emqxsl-ca.crt` and credentials in ignored
+`.env`:
 
 ```dotenv
 MQTT_USERNAME=your-device-username
 MQTT_PASSWORD='your-device-password'
 ```
 
-Both files are gitignored. Deployment copies the CA to `/certs/emqxsl-ca.crt`
-and renders **only** the MQTT username/password into `/settings.toml` on the
-XIAO. REST API credentials stay on the host. Values may be unquoted or enclosed
-in matching quotes; values are literal, the last duplicate wins, and process
-environment variables take precedence. Publishing and deployment share this
-parser. Device `settings.toml` is readable over USB.
+Deployment copies the CA to `/certs/emqxsl-ca.crt` and renders only MQTT
+username/password into device `settings.toml`, readable over USB. REST API
+credentials stay on the host. The dotenv parser accepts literal quoted or
+unquoted values; the last duplicate wins and process environment overrides
+the file.
 
-`make deploy` runs host tests, preflights the inputs, and copies changed app
-and library files to `/Volumes/CIRCUITPY`. Existing libraries are updated;
-unrelated device files and settings are preserved. Override the destination
-with `make deploy CIRCUITPY=/path/to/CIRCUITPY`. CircuitPython normally reloads
-after filesystem writes; there is no hard board reset in the application.
+`make deploy` runs tests, preflights inputs, then copies changed app/library
+files to `/Volumes/CIRCUITPY`, preserving unrelated files and settings.
+Override with `CIRCUITPY=/path`. Filesystem writes normally trigger Python
+autoreload; network recovery never deliberately hard-resets the board.
 
-When Wi-Fi or MQTT settings are missing, join the open `Gate-Setup-<chip suffix>`
-network and visit `http://192.168.4.1`. The portal stores settings in board NVM;
-deploy-time MQTT credentials override saved MQTT credentials. With settings
-present, the app uses station mode and retries connectivity every five seconds
-after failures. Bad saved settings do not automatically reopen the portal.
+With missing settings, join the open `Gate-Setup-<chip suffix>` network and
+visit `http://192.168.4.1`. The portal stores settings in NVM; deploy-time MQTT
+credentials override saved credentials. Provisioned devices retry in station
+mode after connection failures instead of reopening the portal.
 
-## Publish a blink command
+## MQTT status
 
-```sh
-.venv/bin/python tools/mqtt_blink.py 300 --device-id b3640c
-.venv/bin/python tools/mqtt_blink.py 2000 --device-id b3640c
-```
+Default topics are `gate/v1/devices/<device-id>/command` and `/status`.
+The ID is the lowercase chip suffix (`b3640c` for this board). The portal
+can configure custom topics.
 
-The utility uses native MQTT over TLS at
-`jd3a6164.ala.us-east-1.emqxsl.com:8883`, validates the server using
-`emqxsl-ca.crt`, and waits for the broker's QoS 1 acknowledgment. This confirms
-broker receipt; use the hardware test below to confirm device application.
+The device publishes retained `device_status` at connection and every ten
+seconds with `boot_id`, `uptime_ms`, IP, and an `indicators` object containing
+`mqtt_connected` (both Wi-Fi and MQTT ready), `transistor_high`,
+`onboard_led_on`, `hold_led_on`, and `hold_edge_count`.
+Its last will reports `state: "offline"`.
 
-Commands are **retained by default**: the broker stores the latest command on
-each topic and delivers it when a device subscribes again. This suits a desired
-blink setting. `--no-retain` sends a temporary change but does not erase any
-previously retained command. `--transport api` remains available for the older
-Deployment API workflow with `EMQX_API_URL`, `EMQX_APP_ID`, and
-`EMQX_APP_SECRET` in `.env`.
+The command schema is `{"version":1,"type":"hold_gate","duration_seconds":5,
+"command_id":"unique-id"}`. Duration is 0–86400 seconds; zero cancels.
+Commands are never retained, so a reboot cannot replay a timed gate action.
+The firmware also rejects retained hold deliveries, including stale retained
+messages left by older publishers.
+Use `make hold DURATION=5` or `tools/mqtt_hold.py`. Invalid legacy blink
+commands are rejected and cannot change either output.
 
-The interval is the time **between LED transitions**, so 300 ms means about
-300 ms on, then 300 ms off. Accepted values are integer milliseconds from 25
-through 60000. Network activity adds scheduling jitter; this is not a precision
-timer. While provisioning or waiting between connection attempts, the LED uses
-750 ms transitions. Network connection attempts can temporarily pause blinking.
-Online, it defaults to 150 ms until it receives a command.
-
-## Topics and schema
-
-One broker can serve many devices, each with separate topics:
-
-| Purpose | Default topic |
-| --- | --- |
-| Commands | `gate/v1/devices/<device-id>/command` |
-| Status | `gate/v1/devices/<device-id>/status` |
-
-The device ID is its lowercase chip suffix (`b3640c` for this XIAO). Use
-`--topic` for a custom command topic configured in the portal.
-
-```json
-{"version":1,"type":"set_blink_interval","blink_interval_ms":300,"command_id":"unique-request-id"}
-```
-
-The publisher generates a unique `command_id`. It is optional for older
-clients; if present it must be a string of 1–64 characters. Version and type
-allow future commands without changing the topic layout. Duplicate deliveries
-of the current command ID and value do not restart the blink timer.
-
-The device publishes retained `device_status` at connection, after commands,
-and every ten seconds. Online status includes the applied `command_id`,
-`blink_interval_ms`, `boot_id`, `uptime_ms`, and `edge_count`; its last will
-publishes `state: "offline"` if the broker loses the connection. These are
-status reports, not commands.
-
-## Repeatable verification
+## Verification
 
 ```sh
-make test
-make test-hardware-smoke
-make test-hardware
+make test                   # offline regression suite
+make test-hardware-smoke    # passive 20-second observation
+make test-hardware          # passive 70-second observation
 ```
 
-Host tests cover the actual pinned MiniMQTT library's timeout behavior,
-fragmented QoS 1 packets, command validation and scheduling, broker
-acknowledgments, configuration migration, fragmented portal requests, and
-deployment updates.
+Host tests cover connection/hold LED independence, timed hold expiry, active-low polarity,
+D0/D10 allocation and shutdown, legacy-command rejection, MiniMQTT handling,
+configuration migration, portal parsing, publisher, and deployment behavior.
 
-The hardware test requires the configured XIAO on USB, its working Wi-Fi,
-the CA, and `.env` credentials. It opens serial once without interrupting the
-app, then publishes **2000 → 300 ms three times**, retaining each setting.
-For every unique command ID it requires a matching `command_applied` event
-and four alternating GPIO transitions within ±max(75 ms, 15%) of the interval.
-It then observes 70 seconds of heartbeats with increasing edge counts. Any
-session loss, new boot ID, traceback, serial loss, or missing confirmation
-fails the test. It leaves the final **300 ms** setting retained.
+The live test requires a provisioned board connected over USB with working
+Wi-Fi/MQTT. It waits up to 40 seconds for an online heartbeat, then checks
+steady onboard ON and stable session logs. Hold activation should be tested
+with `make hold DURATION=3` while watching the console. It fails on session/boot changes,
+serial loss, missing heartbeats, or tracebacks. It never sends a command or
+resets the board. The full run observes beyond the MQTT keepalive interval;
+use it after firmware, timing, network, or library changes.
 
 ```sh
-make test-hardware TEST_ARGS='--cycles 5 --intervals 2000 300 --soak 120'
+make test-hardware TEST_ARGS='--duration 120'
 ```
 
-Raw logs and a JSON result are saved in ignored `.artifacts/`. The log evidence
-is generated immediately after writes to the LED GPIO; it does not replace
-an optical sensor or oscilloscope measurement. Timing guarantees apply only
-to the tested intervals and observation window.
+Raw logs and a JSON summary are saved to ignored `.artifacts/indicators.*`.
+These are software GPIO measurements; confirm physical light output visually.
+Inactive-hold and disconnected behavior are covered by host tests; the live
+indicator check does not activate the gate by itself.
+The former MQTT command-cycle test does not apply to these automatic LEDs.
 
-Use `make test-hardware-smoke` for a quick one-command, 300 ms check with a
-15-second stability window while iterating. It is useful after a routine
-publisher or deployment change. Use the full `make test-hardware` run after
-firmware, MQTT, timing, or library changes; the smoke test does not replace it.
-
-## Serial console
+## Console
 
 ```sh
 make console CONSOLE_WAIT=20
 make console CONSOLE_WAIT=20 CONSOLE_ARGS=--reload
 ```
 
-The default streams continuously without resetting the board. `--reload`
-explicitly sends Ctrl-C then Ctrl-D to restart Python. Stop other console
-readers before running the hardware test; two readers can consume each other's
-logs. Pass `CONSOLE_ARGS='--port /dev/cu.usbmodem...'` if multiple boards are
-connected. Normal MQTT recovery does not disconnect USB.
+Default monitoring is passive; `--reload` intentionally restarts Python.
+Use one serial reader at a time. With multiple boards, supply
+`CONSOLE_ARGS='--port /dev/cu.usbmodem...'` or the live test's `--port` option.
 
-See [AUDIT.md](AUDIT.md) for the reproduced failure and verification results.
+The collector-powered LED in the diagram is a disconnected bench load.
+The separate D0 LED stays on the XIAO side. The prospective LiftMaster “eyes”
+connection has not been established as a compatible gate-control interface.

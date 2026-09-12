@@ -92,10 +92,17 @@ def receive_packet(connection):
 
 
 def publish_mqtt(broker, port, ca_file, username, password, topic, interval_ms, retain=True, command_id=None):
+    command_id = command_id or uuid.uuid4().hex
+    publish_payload(broker, port, ca_file, username, password, topic,
+                    command_payload(interval_ms, command_id), retain)
+    return command_id
+
+
+def publish_payload(broker, port, ca_file, username, password, topic, payload, retain=False):
+    """Publish JSON with verified TLS and require a matching QoS 1 PUBACK."""
     if not topic or any(character in topic for character in "#+\x00"):
         raise ValueError("command topic must not be empty or contain wildcards or NUL")
-    command_id = command_id or uuid.uuid4().hex
-    payload = command_payload(interval_ms, command_id).encode("utf-8")
+    payload = payload.encode("utf-8")
     context = ssl.create_default_context(cafile=str(ca_file))
     client_id = "gate-push-" + uuid.uuid4().hex[:16]
     with socket.create_connection((broker, port), timeout=10) as raw_socket:
@@ -112,7 +119,6 @@ def publish_mqtt(broker, port, ca_file, username, password, topic, interval_ms, 
             if header != 0x40 or response != b"\x00\x01":
                 raise ConnectionError("MQTT broker did not acknowledge publish packet 1")
             connection.sendall(b"\xE0\x00")
-    return command_id
 
 
 def publish_api(api_url, ca_file, app_id, app_secret, topic, interval_ms, retain):

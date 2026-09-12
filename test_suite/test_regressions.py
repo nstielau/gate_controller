@@ -181,6 +181,7 @@ class ConfigTests(unittest.TestCase):
         self.app = importlib.util.module_from_spec(spec)
         self.nvm = bytearray(512)
         modules = {name: MagicMock() for name in ("board", "digitalio", "wifi", "supervisor")}
+        modules["digitalio"].DigitalInOut.side_effect = lambda pin: MagicMock(value=False)
         modules["microcontroller"] = SimpleNamespace(nvm=self.nvm, cpu=SimpleNamespace(uid=b"123456"))
         with patch.dict(sys.modules, modules):
             spec.loader.exec_module(self.app)
@@ -190,6 +191,9 @@ class ConfigTests(unittest.TestCase):
         self.assertGreater(len(json.dumps(config)), 255)
         self.app.save_config(config)
         self.assertEqual(self.app.load_config(), config)
+
+    def test_transistor_control_uses_d10(self):
+        self.assertIs(self.app.TRANSISTOR_CONTROL_PIN, self.app.board.D10)
 
     def test_loads_both_legacy_nvm_formats(self):
         payload = b'{"ssid":"test","password":"testpass"}'

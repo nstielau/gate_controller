@@ -1,0 +1,4 @@
+(sym_lib_table
+	(version 7)
+	(lib (name "gate-controller-cache") (type "Legacy") (uri "/Users/nickstielau/depot/github.com/nstielau/gate_controller/hardware/gate-controller-cache.lib") (options "") (descr "Legacy project cache library"))
+)

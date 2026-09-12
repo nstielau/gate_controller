@@ -27,6 +27,8 @@ class GateMQTT(MQTT):
                 self._sock.settimeout(NETWORK_SECONDS)
 
     def _wait_for_msg(self, timeout=None):
+        self._reading_header = True
+        self.message_retained = False
         if self._polling:
             self._sock.settimeout(IDLE_SOCKET_SECONDS)
         try:
@@ -37,6 +39,9 @@ class GateMQTT(MQTT):
 
     def _sock_exact_recv(self, bufsize, timeout=None):
         result = super()._sock_exact_recv(bufsize, timeout=timeout)
+        if getattr(self, "_reading_header", False):
+            self._reading_header = False
+            self.message_retained = bool(result[0] & 1) if result else False
         if self._polling:
             # A first byte arrived. Allow fragmented packet contents time to arrive.
             self._sock.settimeout(NETWORK_SECONDS)

@@ -211,7 +211,7 @@ U 1 1 6651A008
 P 5800 1700
 F 0 "J3" H 5880 1692 50  0000 L CNN
 F 1 "Gate_Output" H 5880 1601 50  0000 L CNN
-F 2 "TerminalBlock:TerminalBlock_bornier-2_P5.08mm" H 5800 1700 50  0001 C CNN
+F 2 "TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal" H 5800 1700 50  0001 C CNN
 F 3 "~" H 5800 1700 50  0001 C CNN
 	1    5800 1700
 	1    0    0    -1

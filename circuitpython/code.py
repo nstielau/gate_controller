@@ -19,11 +19,10 @@ import board
 import digitalio
 import supervisor
 from gate_mqtt import GateMQTT, NETWORK_SECONDS
-from gate_state import BlinkState
+from gate_indicators import Indicators
+from gate_hold import HoldState
 
 
-SLOW_BLINK_SECONDS = 0.75
-FAST_BLINK_SECONDS = 0.15
 CONFIG_SIZE = min(512, len(microcontroller.nvm))
 CONFIG_MAGIC = b"GATE3"
 OLD_CONFIG_MAGIC = b"GATE1"
@@ -34,10 +33,38 @@ MQTT_PORT = 8883
 EMQX_CA_FILE = "/certs/emqxsl-ca.crt"
 BOOT_ID = "".join("{:02x}".format(value) for value in os.urandom(6))
 
+TRANSISTOR_CONTROL_PIN = board.D10
+HOLD_INDICATOR_PIN = board.D0
 
 led = digitalio.DigitalInOut(board.LED)
-led.direction = digitalio.Direction.OUTPUT
-led.value = False
+led.switch_to_output(value=False)  # Onboard LED is active LOW.
+
+gate_output = None
+hold_led = None
+indicators = Indicators(time.monotonic())
+hold = HoldState()
+hold_samples_left = 4
+
+
+def service_status_led(connected, gate_active, now):
+    """Connectivity on board. Hold indication on D0; never touch D10 here."""
+    global hold_samples_left
+    changed, elapsed = indicators.tick(now, connected, gate_active)
+    led.value = not indicators.connection_on
+    hold_led.value = indicators.hold_on
+    if changed:
+        hold_samples_left = 4
+        log_event("indicator_mode", **indicator_status())
+    if elapsed is not None and hold_samples_left:
+        hold_samples_left -= 1
+        log_event("indicator_edge", pin="D0", on=indicators.hold_on, elapsed_ms=elapsed)
+
+
+def indicator_status():
+    return {"mqtt_connected": bool(indicators.connected),
+            "transistor_high": bool(gate_output.value),
+            "onboard_led_on": not led.value, "hold_led_on": hold_led.value,
+            "hold_edge_count": indicators.hold_edges}
 
 
 def device_suffix():
@@ -313,13 +340,11 @@ def log_event(event, **fields):
 
 
 def status_payload(runtime):
-    state = runtime["blink"]
     return json.dumps({
         "version": 1, "type": "device_status", "state": "online",
         "device_id": device_suffix().lower(), "ip": str(wifi.radio.ipv4_address),
-        "blink_interval_ms": state.interval_ms, "command_id": state.command_id,
         "boot_id": BOOT_ID, "uptime_ms": int(time.monotonic() * 1000),
-        "edge_count": state.edge_count,
+        "indicators": indicator_status(), "hold_remaining_seconds": hold.remaining(time.monotonic()),
     })
 
 
@@ -327,17 +352,24 @@ def on_mqtt_message(client, topic, message):
     runtime = client.user_data
     if topic != runtime["command_topic"]:
         return
+    if getattr(client, "message_retained", False):
+        log_event("command_rejected", reason="retained hold commands are unsafe")
+        return
     try:
-        changed = runtime["blink"].apply(message, time.monotonic())
-    except (TypeError, ValueError):
-        log_event("command_rejected", reason="invalid schema or interval")
+        hold.apply(message, time.monotonic())
+    except ValueError:
+        log_event("command_rejected", reason="invalid hold schema")
         return
-    if not changed:
-        return
-    # Publish outside the receive callback; don't nest MQTT protocol operations.
-    runtime["dirty"] = True
-    state = runtime["blink"]
-    log_event("command_applied", command_id=state.command_id, blink_interval_ms=state.interval_ms)
+    client.user_data["dirty"] = True
+    log_event("hold_applied", command_id=hold.command_id,
+              duration_seconds=hold.duration_seconds)
+
+
+def service_outputs(runtime, online):
+    now = time.monotonic()
+    active = hold.active(now)
+    gate_output.value = active
+    service_status_led(online, active, now)
 
 
 def connect_mqtt(pool, config, runtime):
@@ -365,15 +397,6 @@ def connect_mqtt(pool, config, runtime):
     runtime["dirty"] = True
     log_event("mqtt_connected", command_topic=config["mqtt_command_topic"])
     return client
-
-
-def blink(online, last_blink):
-    interval = FAST_BLINK_SECONDS if online else SLOW_BLINK_SECONDS
-    now = time.monotonic()
-    if now - last_blink >= interval:
-        led.value = not led.value
-        return now
-    return last_blink
 
 
 def start_portal():
@@ -406,31 +429,22 @@ def start_portal():
 def run_portal():
     """Serve provisioning until the submitted form resets the controller."""
     _, http, dns, ap_ip = start_portal()
-    last_blink = time.monotonic()
     while True:
-        last_blink = blink(False, last_blink)
+        service_outputs(None, online=False)
         service_dns(dns, ap_ip)
         service_http(http)
 
 
 def run_configured_controller(pool, config):
     """A single retry loop restores Wi-Fi before recreating the MQTT session."""
-    runtime = {"blink": BlinkState(time.monotonic()),
-               "command_topic": config["mqtt_command_topic"], "dirty": True}
-    state = runtime["blink"]
+    global hold_samples_left
+    runtime = {"command_topic": config["mqtt_command_topic"], "dirty": True}
     client = None
     next_attempt = 0
     last_status = 0
     while True:
         now = time.monotonic()
-        elapsed = state.tick(now, online=client is not None)
-        if elapsed is not None:
-            led.value = not led.value
-            if client is not None and state.samples_left:
-                state.samples_left -= 1
-                log_event("led_edge", command_id=state.command_id,
-                          blink_interval_ms=state.interval_ms, elapsed_ms=elapsed,
-                          led_on=not led.value, edge_count=state.edge_count)
+        service_outputs(runtime, online=client is not None and wifi.radio.connected)
         try:
             if client is None:
                 if now < next_attempt:
@@ -444,15 +458,17 @@ def run_configured_controller(pool, config):
             if not wifi.radio.connected:
                 raise ConnectionError("Wi-Fi disconnected")
             client.poll()
+            service_outputs(runtime, online=True)
             if runtime["dirty"] or now - last_status >= 10:
                 client.publish(config["mqtt_topic"], status_payload(runtime), retain=True)
                 runtime["dirty"] = False
                 last_status = time.monotonic()
-                log_event("heartbeat", command_id=state.command_id,
-                          blink_interval_ms=state.interval_ms, edge_count=state.edge_count)
+                log_event("heartbeat", **indicator_status())
+                hold_samples_left = 4
         except (ConnectionError, MQTT.MMQTTException, OSError) as error:
             # ValueError is a programming/configuration error, not a network failure.
             log_event("connection_error", error=str(error))
+            service_outputs(runtime, online=False)
             if client is not None:
                 client.close()
                 client = None
@@ -461,14 +477,26 @@ def run_configured_controller(pool, config):
 
 
 def main():
+    global gate_output, hold_led
     log_event("boot", reset_reason=str(microcontroller.cpu.reset_reason))
-    config = add_settings_credentials(load_config())
-    if config and mqtt_ready(config):
-        pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
-        run_configured_controller(pool, config)
-    else:
-        log_event("provisioning")
-        run_portal()
+    hold_led = digitalio.DigitalInOut(HOLD_INDICATOR_PIN)
+    hold_led.switch_to_output(value=False)
+    gate_output = digitalio.DigitalInOut(TRANSISTOR_CONTROL_PIN)
+    try:
+        gate_output.switch_to_output(value=False)
+        service_outputs(None, online=False)
+        config = add_settings_credentials(load_config())
+        if config and mqtt_ready(config):
+            pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
+            run_configured_controller(pool, config)
+        else:
+            log_event("provisioning")
+            run_portal()
+    finally:
+        gate_output.value = False
+        gate_output.deinit()
+        hold_led.value = False
+        hold_led.deinit()
 
 
 if __name__ == "__main__":

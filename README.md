@@ -2,11 +2,21 @@
 
 Alexa-enabled driveway gate controller with custom FeatherWing PCB.
 
-The XIAO ESP32S3 CircuitPython app provides Wi-Fi provisioning and MQTT LED
-control. See [circuitpython/README.md](circuitpython/README.md) for setup,
-publishing, deployment, and hardware verification. Host dependencies are
+The XIAO ESP32S3 CircuitPython app provides Wi-Fi provisioning, MQTT, and
+connection/hold indicators. See [circuitpython/README.md](circuitpython/README.md)
+for setup, deployment, and hardware verification. Host dependencies are
 managed with `uv`; use `make setup`, `make test`, and `make deploy` from the
 repository root.
+
+The current bench firmware holds D10/GPIO9 LOW at startup. A hold message raises
+D10 and the separate D0/GPIO1 LED for the requested duration; the D0 LED blinks
+four times per second while active and is otherwise off. Wire D0 through 1 kΩ
+to the LED anode, cathode to GND. D9 is unused.
+See the [connection guide](docs/xiao-breadboard.svg) and the
+[170-hole mini breadboard layout](docs/xiao-breadboard.md), including the
+Fritzing project and exact hole assignments. The transistor collector
+LED is a disconnected bench load; the prospective LiftMaster eyes interface
+has not been validated. Current firmware ignores legacy MQTT blink commands.
 
 ## Software
 

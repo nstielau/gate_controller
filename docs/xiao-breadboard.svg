@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1040" viewBox="0 0 1200 1040" role="img" aria-labelledby="title desc">
+  <title id="title">XIAO ESP32S3 — transistor bench load and separate hold indicator</title>
+  <desc id="desc">D10 GPIO9 drives the 2N3904 base through 1 kiloohm; emitter to GND, with a 100 kiloohm base pulldown. A red bench LED and 1 kiloohm resistor connect from 3V3 to collector, with the gate disconnected. A separate green signal indicator connects from D0 GPIO1 through its own 1 kiloohm resistor and LED to XIAO GND; it blinks while D10 is HIGH. The onboard LED blinks until Wi-Fi and MQTT connect, then stays ON. D9 unused. Connection guide, not exact breadboard hole placement.</desc>
+  <defs>
+    <marker id="light-arrow" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#c0392b"/></marker>
+  </defs>
+  <style>
+    text { font-family: system-ui, sans-serif; fill: #17202a; }
+    .label { font-size: 18px; font-weight: 600; }
+    .small { font-size: 15px; }
+    .pin { font-size: 16px; font-weight: 600; }
+    .wire { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 5; }
+    .signal { stroke: #d35400; }
+    .ground { stroke: #34495e; }
+    .power { stroke: #c0392b; }
+    .component { fill: #f5dfbc; stroke: #85643b; stroke-width: 2; }
+  </style>
+  <rect width="1200" height="1040" fill="#f7f9f9"/>
+  <text x="40" y="48" font-size="30" font-weight="700">Transistor bench load + separate hold indicator</text>
+  <text x="40" y="80" class="label">Hold message → D10 HIGH + D0 LED blinks · Onboard LED shows Wi-Fi/MQTT readiness</text>
+  <text x="40" y="108" class="small">USB-powered bench circuit · Gate disconnected · D9 unused</text>
+  <rect x="290" y="140" width="865" height="475" rx="16" fill="white" stroke="#c6cfd3" stroke-width="2"/>
+  <text x="315" y="168" class="small">Breadboard circuit — connections shown, not exact hole positions</text>
+
+  <!-- Labeled board block; pin positions are illustrative. -->
+  <rect x="60" y="195" width="145" height="395" rx="14" fill="#34495e" stroke="#17202a" stroke-width="2"/>
+  <rect x="104" y="180" width="58" height="32" rx="7" fill="#d5d8dc" stroke="#7f8c8d" stroke-width="2"/>
+  <text x="133" y="250" text-anchor="middle" style="fill:white" font-size="21" font-weight="700">XIAO</text>
+  <text x="133" y="275" text-anchor="middle" style="fill:white" class="small">ESP32S3</text>
+  <text x="187" y="324" text-anchor="end" style="fill:white" class="pin">3V3</text>
+  <text x="187" y="394" text-anchor="end" style="fill:white" class="pin">D10 / GPIO9</text>
+  <text x="187" y="574" text-anchor="end" style="fill:white" class="pin">GND</text>
+  <circle cx="205" cy="320" r="7" fill="#c0392b"/>
+  <circle cx="205" cy="390" r="7" fill="#d35400"/>
+  <circle cx="205" cy="570" r="7" fill="#34495e" stroke="white" stroke-width="2"/>
+
+  <!-- 3V3 -> LED resistor -> anode -> cathode -> collector. -->
+  <path d="M205 320 H250 V200 H1000 V235" class="wire power"/>
+  <text x="335" y="225" class="small">3.3 V supply</text>
+  <rect x="983" y="235" width="34" height="70" rx="5" class="component"/>
+  <text x="1040" y="265" class="label">R2</text>
+  <text x="1040" y="289" class="small">1 kΩ</text>
+  <path d="M1000 305 V350" class="wire power"/>
+  <text x="1025" y="337" class="small">A (+)</text>
+  <polygon points="980,350 1020,350 1000,385" fill="#ef7168" stroke="#c0392b" stroke-width="3"/>
+  <path d="M978 390 H1022" stroke="#c0392b" stroke-width="4"/>
+  <path d="M1025 361 L1051 343 M1034 378 L1060 360" fill="none" stroke="#c0392b" stroke-width="2" marker-end="url(#light-arrow)"/>
+  <text x="840" y="355" class="label">Bench LED</text>
+  <text x="840" y="379" class="small">Steady red</text>
+  <text x="1025" y="416" class="small">K (−)</text>
+  <path d="M1000 390 V445 H815 V315 H745 V353" class="wire signal"/>
+
+  <!-- D10 / GPIO9 -> base resistor -> base. -->
+  <path d="M205 390 H350 M450 390 H680" class="wire signal"/>
+  <rect x="350" y="373" width="100" height="34" rx="5" class="component"/>
+  <text x="400" y="398" text-anchor="middle" class="small">R1 1 kΩ</text>
+  <text x="350" y="350" class="small">Base current limit</text>
+
+  <!-- NPN symbol; emitter arrow points away from the base. -->
+  <circle cx="716" cy="390" r="58" fill="none" stroke="#34495e" stroke-width="2"/>
+  <path d="M680 361 V419 M680 377 L745 353 M680 403 L745 437 V570" class="wire ground"/>
+  <polygon points="737,433 719,430 726,417" fill="#34495e"/>
+  <text x="640" y="375" class="pin">B</text>
+  <text x="756" y="330" class="pin">C</text>
+  <text x="756" y="467" class="pin">E</text>
+  <text x="640" y="270" class="label">Q1 · 2N3904</text>
+  <text x="640" y="293" class="small">NPN transistor</text>
+
+  <!-- Base pulldown and common emitter ground. -->
+  <path d="M550 390 V450 M550 510 V570 M205 570 H1000" class="wire ground"/>
+  <rect x="533" y="450" width="34" height="60" rx="5" class="component"/>
+  <text x="365" y="470" class="label">R3 · 100 kΩ</text>
+  <text x="365" y="494" class="small">Base pulldown</text>
+  <circle cx="550" cy="390" r="6" fill="#d35400"/>
+  <circle cx="550" cy="570" r="6" fill="#34495e"/>
+  <circle cx="745" cy="570" r="6" fill="#34495e"/>
+  <text x="830" y="552" class="small">Common GND</text>
+  <text x="40" y="657" class="label">Bench only: 3V3 → R2 (1 kΩ) → red LED → collector; emitter → GND.</text>
+  <text x="40" y="686" class="small">Use separate 1 kΩ resistors for the base and LED. Verify your transistor’s B / C / E pinout before wiring.</text>
+  <text x="40" y="715" class="small">A hold message makes D10 HIGH and lights this bench load. Do not put the LED in series with the gate input.</text>
+  <!-- Separate XIAO-side indicator: no connection to the collector/load. -->
+  <rect x="40" y="755" width="1115" height="225" rx="16" fill="white" stroke="#c6cfd3" stroke-width="2"/>
+  <text x="65" y="790" class="label">Add this: D0 hold indicator · separate from the transistor load</text>
+  <text x="65" y="816" class="small">D10 HIGH: four flashes per second. D10 LOW: off. This reports the output state, not measured gate position.</text>
+  <text x="85" y="866" class="pin">XIAO D0</text>
+  <text x="85" y="890" class="small">GPIO1</text>
+  <path d="M200 870 H310 M410 870 H570" class="wire" stroke="#148148"/>
+  <circle cx="200" cy="870" r="6" fill="#148148"/>
+  <rect x="310" y="853" width="100" height="34" rx="5" class="component"/>
+  <text x="360" y="878" text-anchor="middle" class="small">R4 1 kΩ</text>
+  <polygon points="570,850 570,890 610,870" fill="#65cc88" stroke="#148148" stroke-width="3"/>
+  <path d="M615 848 V892" stroke="#148148" stroke-width="4"/>
+  <path d="M585 844 L602 827 M600 849 L617 832" stroke="#148148" stroke-width="2"/>
+  <path d="M615 870 H840" class="wire ground"/>
+  <circle cx="840" cy="870" r="6" fill="#34495e"/>
+  <text x="855" y="876" class="pin">XIAO GND</text>
+  <text x="505" y="918" class="small">Anode (+)</text>
+  <text x="620" y="918" class="small">Cathode (−)</text>
+  <text x="65" y="955" class="small">Use the pin labeled D0, not GPIO9 (which is D10). This LED needs its own resistor.</text>
+  <text x="40" y="1015" class="small">Onboard LED: blinks while connecting, then solid ON. Gate “eyes” interface is not validated by this bench guide.</text>
+</svg>
