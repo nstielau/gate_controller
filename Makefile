@@ -4,12 +4,22 @@ PYTHON := .venv/bin/python
 CONSOLE_WAIT ?= 3
 CONSOLE_ARGS ?=
 TEST_ARGS ?=
+JAVA_BIN ?= /opt/homebrew/opt/openjdk@21/bin
 
-.PHONY: setup check test test-hardware test-hardware-smoke deploy status console fritzing fritzing-preview hold
+.PHONY: setup check lint precommit-install precommit test test-hardware test-hardware-smoke deploy status console fritzing fritzing-preview hold
 
 setup:
 	uv venv --allow-existing .venv
 	uv pip sync --python "$(PYTHON)" tools/requirements-dev.lock
+
+lint:
+	uvx --from ruff ruff check circuitpython tools test_suite
+
+precommit-install:
+	uvx --from pre-commit pre-commit install
+
+precommit:
+	uvx --from pre-commit pre-commit run --all-files
 
 fritzing:
 	uv run --cache-dir .artifacts/uv-cache tools/make_fritzing.py
@@ -45,3 +55,47 @@ console:
 
 deploy: test
 	$(PYTHON) tools/deploy.py "$(CIRCUITPY)"
+
+.PHONY: web-setup web-build web-test web-test-unit web-test-browser web-test-emulator web-test-mqtt web-test-live web-deploy web-status web-secrets web-grant web-revoke
+
+web-setup:
+	npm ci
+	npm --prefix firebase/functions ci
+	npx playwright install chromium webkit
+
+web-build:
+	npm run build
+
+web-test-unit:
+	npm test
+
+web-test-browser:
+	npm run test:web
+
+web-test-emulator:
+	PATH="$(JAVA_BIN):$(PATH)" npm run test:emulator
+
+web-test: web-test-unit web-test-browser web-test-emulator
+
+web-test-mqtt:
+	$(PYTHON) tools/test_web_mqtt.py
+
+web-test-live:
+	npm run test:live
+
+web-deploy: web-test
+	npm run deploy
+
+web-status:
+	$(PYTHON) tools/firebase_cloud.py status
+
+web-secrets:
+	$(PYTHON) tools/firebase_cloud.py secrets
+
+web-grant:
+	@test -n "$(EMAIL)" || (echo 'Usage: make web-grant EMAIL=user@example.com [DEVICE_ID=b3640c]'; exit 1)
+	node_modules/.bin/node firebase/functions/admin.cjs grant "$(EMAIL)" "$(or $(DEVICE_ID),b3640c)"
+
+web-revoke:
+	@test -n "$(EMAIL)" || (echo 'Usage: make web-revoke EMAIL=user@example.com [DEVICE_ID=b3640c]'; exit 1)
+	node_modules/.bin/node firebase/functions/admin.cjs revoke "$(EMAIL)" "$(or $(DEVICE_ID),b3640c)"

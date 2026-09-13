@@ -4,3 +4,13 @@ emqxsl-ca.crt
 .venv/
 .artifacts/
 settings.toml
+web/firebase-config.js
+firebase/functions/node_modules/
+.firebase/
+firebase-debug*.log
+node_modules/
+web/dist/
+web/app-check-config.js
+playwright-report/
+test-results/
+firestore-debug.log

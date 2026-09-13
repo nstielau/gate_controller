@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#173f35">
+  <meta name="description" content="Secure, timed access to your gate.">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/assets/drawbridge-castle.png" type="image/png" sizes="128x128">
+  <link rel="apple-touch-icon" href="/castle-192.png">
+  <link rel="stylesheet" href="/styles.css"><title>Drawbridge</title>
+</head>
+<body><main>
+  <header>
+    <div class="brand">
+      <img class="castle-icon" src="/assets/drawbridge-castle.png" alt="">
+      <span class="wordmark">DRAWBRIDGE</span>
+    </div>
+    <div class="account-status">
+      <span id="connection" class="badge">Connecting</span>
+      <div class="account-menu">
+        <button id="account-menu-button" class="profile-button" type="button" hidden aria-label="Account menu" aria-expanded="false" aria-controls="account-dropdown">
+          <img id="profile-photo" class="profile-photo" hidden alt="" referrerpolicy="no-referrer">
+          <span id="profile-initial" class="profile-initial" hidden aria-hidden="true"></span>
+        </button>
+        <div id="account-dropdown" class="account-dropdown" hidden role="menu">
+          <button id="refresh" class="menu-action" role="menuitem" type="button">Refresh access</button>
+          <button id="rename" class="menu-action" role="menuitem" type="button">Edit nickname</button>
+          <form id="nickname-form" hidden>
+            <label for="nickname">Gate nickname</label>
+            <input id="nickname" name="nickname" required maxlength="80" autocomplete="off" aria-describedby="nickname-hint">
+            <p id="nickname-hint" class="hint">Shown to everyone with access to this gate.</p>
+            <div class="account-actions">
+              <button id="nickname-save" type="submit">Save nickname</button>
+              <button id="nickname-cancel" type="button" class="quiet">Cancel</button>
+            </div>
+            <p id="nickname-result" role="status"></p>
+          </form>
+          <button id="sign-out" class="menu-action" role="menuitem" type="button">Sign out</button>
+        </div>
+      </div>
+    </div>
+  </header>
+  <section id="signed-out-hero" class="signed-out-hero" hidden aria-labelledby="signed-out-title">
+    <img class="castle-hero" src="/assets/drawbridge-castle.png" alt="">
+    <h1 id="signed-out-title">DRAWBRIDGE</h1>
+    <p>Secure, timed access to your gate.</p>
+    <button id="sign-in">Login with Google</button>
+  </section>
+  <p id="user-state">Connecting securely…</p>
+  <section id="controls" hidden aria-labelledby="hold-heading">
+    <label for="device">Your gate</label><select id="device"></select>
+    <div class="hold-heading">
+      <h2 id="hold-heading">Hold open for</h2>
+      <p id="hold-countdown" hidden aria-live="polite"></p>
+    </div>
+    <div class="buttons">
+      <button data-duration="60"><strong>1</strong> minute</button>
+      <button data-duration="900"><strong>15</strong> minutes</button>
+      <button data-duration="3600"><strong>1</strong> hour</button>
+      <button data-duration="21600"><strong>6</strong> hours</button>
+    </div>
+    <button data-duration="0" class="release">End hold</button>
+    <p class="hint">Each new command replaces the previous hold duration.</p>
+  </section>
+  <p id="result" role="status" aria-live="polite"></p>
+  <p id="offline" hidden>You're offline. Reconnect to send a command.</p>
+  <button id="update" class="quiet" hidden>Update available · reload</button>
+  <noscript>JavaScript is required to sign in and control your gate.</noscript>
+</main><script type="module" src="/app.js"></script></body>
+</html>
