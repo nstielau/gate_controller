@@ -47,6 +47,12 @@ LED is a disconnected bench load; the prospective LiftMaster eyes interface
 has not been validated. Current firmware ignores legacy MQTT blink commands.
 The installed wiring is documented in [this field photo](docs/wiring-installed.jpg).
 
+The LiftMaster controller's EXIT terminal pair and its current yellow/green
+wiring are shown below. Use this as a visual record of the installation; it
+does not establish the terminal's electrical interface or ratings.
+
+![LiftMaster EXIT terminal wiring](docs/liftmaster-exit-terminals.jpg)
+
 ## Hardware
 
 KiCad source files in `hardware/` are retained as a board-design reference.

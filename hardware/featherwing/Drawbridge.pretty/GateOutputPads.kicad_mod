@@ -1,0 +1,1 @@
+(footprint "GateOutputPads" (version 20260206) (generator "drawbridge") (layer "F.Cu") (attr through_hole) (pad "1" thru_hole rect (at 0 0) (size 2.2 2.2) (drill 1.2) (layers "*.Cu" "*.Mask")) (pad "2" thru_hole circle (at 0 2.54) (size 2.2 2.2) (drill 1.2) (layers "*.Cu" "*.Mask")))
