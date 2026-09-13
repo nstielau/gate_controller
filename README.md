@@ -45,6 +45,7 @@ See the [connection guide](docs/xiao-breadboard.svg) and the
 Fritzing project and exact hole assignments. The transistor collector
 LED is a disconnected bench load; the prospective LiftMaster eyes interface
 has not been validated. Current firmware ignores legacy MQTT blink commands.
+The installed wiring is documented in [this field photo](docs/wiring-installed.jpg).
 
 ## Hardware
 
