@@ -26,6 +26,9 @@ function publicHold(value) {
       value.durationSeconds === 0) return null;
   return {startedAtMs: value.startedAtMs, durationSeconds: value.durationSeconds};
 }
+function publicHoldCount(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
 function createController({store, publish, now = Date.now}) {
   return {
     async renameGate(request) {
@@ -45,7 +48,7 @@ function createController({store, publish, now = Date.now}) {
       const devices = await store.list(uid);
       return {devices: devices.filter(d => canControl(d, d.id, uid)).map(d => ({
         id: d.id, name: typeof d.name === "string" ? d.name.slice(0, 80) : d.id,
-        hold: publicHold(d.activeHold)
+        hold: publicHold(d.activeHold), holdCount: publicHoldCount(d.holdCount)
       }))};
     },
     async holdGate(request) {
@@ -79,4 +82,4 @@ function createController({store, publish, now = Date.now}) {
     }
   };
 }
-module.exports = {createController, canControl, fail, publicHold};
+module.exports = {createController, canControl, fail, publicHold, publicHoldCount};

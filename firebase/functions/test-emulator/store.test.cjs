@@ -26,6 +26,7 @@ test("concurrent duplicate requests publish once and persist the audit", async (
   const doc = (await db.doc("commands/" + results[0].commandId).get()).data();
   assert.equal(doc.status, "accepted"); assert.equal(doc.uid, "operator");
   assert.equal(doc.durationSeconds, 60);
+  assert.equal((await db.doc("devices/" + f.id).get()).data().holdCount, 1);
   assert.deepEqual((await db.doc("devices/" + f.id).get()).data().activeHold, {startedAtMs: f.now, durationSeconds: 60});
   assert.equal((await f.controller.holdGate(f.request)).status, "accepted");
   assert.equal(f.publishes.length, 1);
@@ -68,6 +69,7 @@ test("multiple command cycles work after the cooldown", async () => {
   }
   assert.deepEqual(f.publishes.map(p => p[1].duration_seconds), [60, 900, 3600, 21600, 0]);
   assert.equal((await db.doc("devices/" + f.id).get()).data().activeHold, null);
+  assert.equal((await db.doc("devices/" + f.id).get()).data().holdCount, 4);
 });
 test("expected hold survives a device refresh and an uncertain command clears it", async () => {
   const f = await fixture();

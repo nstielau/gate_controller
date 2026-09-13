@@ -33,6 +33,13 @@ function toggleAccountMenu() {
 function activeHoldForSelectedGate() {
   return devices.find(device => device.id === $("#device").value)?.hold || null;
 }
+function renderDeviceMetric() {
+  const device = devices.find(item => item.id === $("#device").value);
+  const metric = $("#device-metric");
+  if (!device) { metric.textContent = ""; return; }
+  const count = Number.isSafeInteger(device.holdCount) && device.holdCount >= 0 ? device.holdCount : 0;
+  metric.textContent = `${count} hold${count === 1 ? "" : "s"} issued`;
+}
 function formatRemaining(milliseconds) {
   const seconds = Math.ceil(milliseconds / 1000);
   const hours = Math.floor(seconds / 3600);
@@ -65,6 +72,7 @@ function renderHold() {
 function startCountdown() {
   clearInterval(countdownTimer);
   renderHold();
+  renderDeviceMetric();
   countdownTimer = setInterval(renderHold, 1000);
 }
 function render() {
@@ -113,7 +121,7 @@ async function loadDevices() {
 }
 $("#account-menu-button").onclick = toggleAccountMenu;
 $("#refresh").onclick = () => { closeAccountMenu(); loadDevices(); };
-$("#device").onchange = () => { closeNickname(); renderHold(); };
+$("#device").onchange = () => { closeNickname(); renderHold(); renderDeviceMetric(); };
 $("#rename").onclick = () => {
   const device = devices.find(d => d.id === $("#device").value);
   if (!device) return;

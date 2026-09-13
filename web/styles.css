@@ -43,6 +43,7 @@ button:disabled { opacity: .45; cursor: default; }
 .hint { font-size: .8rem; color: #52665b; margin: .65rem 0 0; }
 .hold-heading { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; margin: 1rem 0 .65rem; }
 #hold-countdown { margin: 0; font-size: .8rem; color: #52665b; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.device-metric { margin: .3rem 0 0; font-size: .75rem; color: #718078; }
 #result { min-height: 1.25rem; margin: .65rem 0 0; font-size: .9rem; }
 #offline { padding: .8rem; border-radius: .5rem; background: #ffecd3; }
 #user-state { margin: .65rem 0 0; }

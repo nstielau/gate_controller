@@ -39,8 +39,13 @@ function createStore(db) {
       const commandRef = db.doc(`commands/${id}`);
       const deviceRef = db.doc(`devices/${deviceId}`);
       await db.runTransaction(async tx => {
-        const device = await tx.get(deviceRef);
+        const [command, device] = await tx.getAll(commandRef, deviceRef);
+        if (!command.exists || command.data().status !== "pending") return;
         tx.update(commandRef, {status, completedAtMs: time});
+        if (status === "accepted" && durationSeconds > 0) {
+          const previous = Number.isSafeInteger(device.data()?.holdCount) ? device.data().holdCount : 0;
+          tx.update(deviceRef, {holdCount: previous + 1});
+        }
         // A later command may already be in flight. Never let an older result
         // overwrite its visible hold state.
         if (!device.exists || device.data().pendingCommandId !== id) return;

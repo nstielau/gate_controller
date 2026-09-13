@@ -33,6 +33,10 @@ sign-in, the current device allowlist, enabled state, exact topic, approved
 duration, UUID request ID, and request age (60 seconds; 10 seconds of future
 clock tolerance). CORS allows the two Drawbridge Hosting domains.
 
+Accepted timed holds are counted server-side in each device record as
+`holdCount` and shown as a small “holds issued” metric in the web app. End-hold
+commands and uncertain deliveries do not increment the count.
+
 Firestore transactions reserve commands before publishing, enforce a
 three-second per-device cooldown, and prevent a repeated request ID from
 publishing again. A changed payload with the same ID is rejected. Commands

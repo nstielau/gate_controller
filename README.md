@@ -11,6 +11,9 @@ and deployment. Use `make web-test-unit` for quick checks, `make web-test`
 for the full local suite, and `make web-deploy` to test and deploy Firebase.
 `make web-test-mqtt` checks the live broker on a synthetic topic.
 
+Per-device MQTT credentials are a planned hardening step. See the
+[per-device credentials plan](docs/per-device-mqtt-credentials.md).
+
 The XIAO ESP32S3 CircuitPython app provides Wi-Fi provisioning, MQTT, and
 connection/hold indicators. See [circuitpython/README.md](circuitpython/README.md)
 for setup, deployment, and hardware verification. Host dependencies are

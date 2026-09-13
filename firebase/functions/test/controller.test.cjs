@@ -51,7 +51,7 @@ test("device listing exposes only labels, IDs, and a validated expected hold", a
     {...device, activeHold: {startedAtMs: time, durationSeconds: 60, commandId: "do-not-leak"}}
   ]}})};
   assert.deepEqual(await h.controller.listDevices({auth}), {devices: [
-    {id: "gate1", name: "Garden", hold: {startedAtMs: time, durationSeconds: 60}}
+    {id: "gate1", name: "Garden", hold: {startedAtMs: time, durationSeconds: 60}, holdCount: 0}
   ]});
 });
 test("broker failures and audit failures after acceptance report uncertainty", async () => {
