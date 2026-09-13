@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Passively verify connected LED states and D0 timing without changing D10."""
+"""Passively verify four indicator states and D2 timing without changing D10."""
 
 import argparse
 import json
@@ -16,7 +16,8 @@ def run(args):
     started = None
     deadline = time.monotonic() + args.timeout
     last_heartbeat = None
-    last_edges = None
+    last_alive_edges = None
+    last_alive_change = None
     previous_sample = None
     samples = []
     heartbeats = 0
@@ -35,30 +36,42 @@ def run(args):
                         raise
                     verify_event(event, boot_id)
                     if event["event"] == "heartbeat" and event.get("mqtt_connected"):
-                        if not event.get("onboard_led_on"):
-                            raise AssertionError("Expected connected onboard LED ON")
+                        if not all(event.get(key) for key in
+                                   ("wifi_connected", "wifi_led_on", "mqtt_led_on")):
+                            raise AssertionError("Expected connected Wi-Fi/D0 and MQTT/D1 LEDs ON")
+                        alive_edges = event["alive_edge_count"]
+                        if (last_alive_edges is not None and alive_edges <= last_alive_edges
+                                and time.monotonic() - last_alive_change > 5):
+                            raise AssertionError("Onboard heartbeat stopped toggling")
+                        if last_alive_edges is None or alive_edges > last_alive_edges:
+                            last_alive_change = time.monotonic()
+                        last_alive_edges = alive_edges
+                        if not event["transistor_high"] and event["hold_led_on"]:
+                            raise AssertionError("D2 must be OFF without a hold")
                         if boot_id is None:
                             boot_id = event["boot_id"]
                             started = time.monotonic()
                             deadline = started + args.duration
                         edges = event["hold_edge_count"]
-                        last_edges = edges
                         last_heartbeat = time.monotonic()
                         previous_sample = None  # logging samples are separated by unlogged edges
                         heartbeats += 1
-                        print("Connected: onboard ON, D10 HIGH, D0 edges {}".format(edges), flush=True)
+                        print("Connected: D0/D1 ON, alive edges {}, D10 {}, D2 edges {}".format(
+                            alive_edges, "HIGH" if event["transistor_high"] else "LOW", edges), flush=True)
                     elif boot_id is not None and event["event"] == "indicator_edge":
-                        if event.get("pin") != "D0":
+                        if event.get("pin") != "D2":
                             raise AssertionError("Unexpected indicator pin")
                         elapsed = event["elapsed_ms"]
                         if not 125 <= elapsed <= 200:
-                            raise AssertionError("D0 transition took {} ms; expected 125–200 ms".format(elapsed))
+                            raise AssertionError("D2 transition took {} ms; expected 125–200 ms".format(elapsed))
                         if previous_sample is not None and event["on"] == previous_sample:
-                            raise AssertionError("D0 samples did not alternate")
+                            raise AssertionError("D2 samples did not alternate")
                         previous_sample = event["on"]
                         samples.append(elapsed)
                     elif boot_id is not None and event["event"] == "indicator_mode":
-                        raise AssertionError("Indicator mode changed during stable connection")
+                        if not event.get("wifi_connected") or not event.get("mqtt_connected"):
+                            raise AssertionError("Connectivity lost during observation")
+                        previous_sample = None
                 if heartbeats < 2:
                     raise AssertionError("Need at least two online heartbeats")
             finally:
@@ -70,8 +83,8 @@ def run(args):
         raise
     finally:
         args.log.with_suffix(".json").write_text(json.dumps(summary, indent=2) + "\n")
-    print("PASS: {} s, {} heartbeats, {} D0 samples ({}–{} ms); logs {}".format(
-        args.duration, heartbeats, len(samples), min(samples), max(samples), args.log))
+    print("PASS: {} s, {} heartbeats, {} D2 samples; logs {}".format(
+        args.duration, heartbeats, len(samples), args.log))
 
 
 def main():

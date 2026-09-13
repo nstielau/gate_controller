@@ -5,20 +5,28 @@ indicators. Targets CircuitPython 10.x; tested on 10.3.0.
 
 | Output | Behavior |
 | --- | --- |
-| Onboard yellow LED | Blinks during startup and while Wi-Fi or MQTT is unavailable; solid ON when both are connected. |
-| D0 / GPIO1 external LED | LOW at boot; blinks four times per second while a hold is active. |
+| Onboard yellow LED | Running heartbeat: 100 ms pulse every 2 seconds. |
+| D0 / GPIO1 external LED | Wi-Fi: 500 ms transitions while connecting; steady ON when connected. |
+| D1 / GPIO2 external LED | MQTT: OFF without Wi-Fi; 500 ms transitions while connecting; steady ON after subscription. |
+| D2 / GPIO3 external LED | Hold: OFF normally; four full blinks per second while D10 is HIGH. |
 | D10 / GPIO9 transistor control | LOW at boot; HIGH only for the requested hold duration. |
 
-D9 is unused. A hold command raises D10 and D0 together for its duration.
-The D0 LED reports the commanded transistor state, not sensed gate position.
+D9 is unused. A hold command raises D10 steadily for its duration.
+The D2 LED reports the commanded transistor state, not sensed gate position.
+The temporary startup diagnostic flashes D0/D1/D2 together three times,
+then releases the pins before normal operation. Its function and call are
+marked for later removal.
 
-Wire **D0 → 1 kΩ resistor → LED anode (+); LED cathode (−) → XIAO GND**.
-See the [connection guide](../docs/xiao-breadboard.svg). D0 and D10 are board
+Wire each of **D0, D1, D2 → its own 1 kΩ resistor → LED anode (+);
+LED cathode (−) → XIAO GND**. D2/GPIO3 is a strapping pin; do not add a
+pull-up or externally drive it during reset.
+The [connection guide](../docs/xiao-breadboard.svg) predates this four-LED assignment.
+D0 and D10 are board
 labels: **D0 is GPIO1**, and **D10 is GPIO9**. The red charging LED is separate.
 
-The onboard LED is active low and uses 500 ms transitions while disconnected.
-D0 uses 125 ms transitions, giving four complete on/off cycles per second.
-Both timers are independent of D10. Blocking Wi-Fi/TLS operations can briefly
+The onboard LED is active low; external LEDs are active high.
+D2 uses 125 ms transitions, giving four complete on/off cycles per second.
+All LED timers are independent of D10. Blocking Wi-Fi/TLS operations can briefly
 pause blinking, especially during connection attempts.
 
 ## Setup and deployment
@@ -70,8 +78,9 @@ can configure custom topics.
 
 The device publishes retained `device_status` at connection and every ten
 seconds with `boot_id`, `uptime_ms`, IP, and an `indicators` object containing
-`mqtt_connected` (both Wi-Fi and MQTT ready), `transistor_high`,
-`onboard_led_on`, `hold_led_on`, and `hold_edge_count`.
+`wifi_connected`, `mqtt_connected` (both Wi-Fi and MQTT ready), `transistor_high`,
+`wifi_led_on`, `mqtt_led_on`, `onboard_led_on`, `alive_edge_count`,
+`hold_led_on`, and `hold_edge_count`.
 Its last will reports `state: "offline"`.
 
 The command schema is `{"version":1,"type":"hold_gate","duration_seconds":5,
@@ -91,12 +100,12 @@ make test-hardware          # passive 70-second observation
 ```
 
 Host tests cover connection/hold LED independence, timed hold expiry, active-low polarity,
-D0/D10 allocation and shutdown, legacy-command rejection, MiniMQTT handling,
+D0/D1/D2/D10 allocation and shutdown, legacy-command rejection, MiniMQTT handling,
 configuration migration, portal parsing, publisher, and deployment behavior.
 
 The live test requires a provisioned board connected over USB with working
 Wi-Fi/MQTT. It waits up to 40 seconds for an online heartbeat, then checks
-steady onboard ON and stable session logs. Hold activation should be tested
+steady D0/D1 ON, advancing onboard heartbeat edge counts, and stable session logs. Hold activation should be tested
 with `make hold DURATION=3` while watching the console. It fails on session/boot changes,
 serial loss, missing heartbeats, or tracebacks. It never sends a command or
 resets the board. The full run observes beyond the MQTT keepalive interval;
@@ -124,5 +133,5 @@ Use one serial reader at a time. With multiple boards, supply
 `CONSOLE_ARGS='--port /dev/cu.usbmodem...'` or the live test's `--port` option.
 
 The collector-powered LED in the diagram is a disconnected bench load.
-The separate D0 LED stays on the XIAO side. The prospective LiftMaster “eyes”
+The separate signal LEDs stay on the XIAO side. The prospective LiftMaster “eyes”
 connection has not been established as a compatible gate-control interface.

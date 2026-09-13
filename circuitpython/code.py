@@ -34,34 +34,64 @@ EMQX_CA_FILE = "/certs/emqxsl-ca.crt"
 BOOT_ID = "".join("{:02x}".format(value) for value in os.urandom(6))
 
 TRANSISTOR_CONTROL_PIN = board.D10
-HOLD_INDICATOR_PIN = board.D0
+WIFI_INDICATOR_PIN = board.D0
+MQTT_INDICATOR_PIN = board.D1
+HOLD_INDICATOR_PIN = board.D2
 
 led = digitalio.DigitalInOut(board.LED)
 led.switch_to_output(value=False)  # Onboard LED is active LOW.
 
 gate_output = None
 hold_led = None
+wifi_led = None
+mqtt_led = None
 indicators = Indicators(time.monotonic())
 hold = HoldState()
 hold_samples_left = 4
 
 
-def service_status_led(connected, gate_active, now):
-    """Connectivity on board. Hold indication on D0; never touch D10 here."""
+# TEMPORARY STARTUP DIAGNOSTIC — remove this function and its call in main()
+# once the external wiring has been verified. It flashes the three candidate
+# signal pins together before Wi-Fi, MQTT, or any other controller work starts.
+def startup_pin_diagnostic():
+    pins = [digitalio.DigitalInOut(pin) for pin in (board.D0, board.D1, board.D2)]
+    try:
+        for output in pins:
+            output.switch_to_output(value=False)
+        for _ in range(3):
+            for output in pins:
+                output.value = True
+            time.sleep(0.2)
+            for output in pins:
+                output.value = False
+            time.sleep(0.2)
+    finally:
+        for output in pins:
+            output.value = False
+            output.deinit()
+
+
+def service_status_led(wifi_connected, mqtt_connected, gate_active, now):
+    """Independent health, Wi-Fi, MQTT and hold LEDs; never touch D10 here."""
     global hold_samples_left
-    changed, elapsed = indicators.tick(now, connected, gate_active)
-    led.value = not indicators.connection_on
+    changed, elapsed = indicators.tick(now, wifi_connected, mqtt_connected, gate_active)
+    led.value = not indicators.alive_on
+    wifi_led.value = indicators.wifi_on
+    mqtt_led.value = indicators.mqtt_on
     hold_led.value = indicators.hold_on
     if changed:
         hold_samples_left = 4
         log_event("indicator_mode", **indicator_status())
     if elapsed is not None and hold_samples_left:
         hold_samples_left -= 1
-        log_event("indicator_edge", pin="D0", on=indicators.hold_on, elapsed_ms=elapsed)
+        log_event("indicator_edge", pin="D2", on=indicators.hold_on, elapsed_ms=elapsed)
 
 
 def indicator_status():
-    return {"mqtt_connected": bool(indicators.connected),
+    return {"wifi_connected": bool(indicators.wifi_connected),
+            "mqtt_connected": bool(indicators.mqtt_connected),
+            "wifi_led_on": wifi_led.value, "mqtt_led_on": mqtt_led.value,
+            "alive_edge_count": indicators.alive_edges,
             "transistor_high": bool(gate_output.value),
             "onboard_led_on": not led.value, "hold_led_on": hold_led.value,
             "hold_edge_count": indicators.hold_edges}
@@ -369,7 +399,7 @@ def service_outputs(runtime, online):
     now = time.monotonic()
     active = hold.active(now)
     gate_output.value = active
-    service_status_led(online, active, now)
+    service_status_led(bool(wifi.radio.connected), online, active, now)
 
 
 def connect_mqtt(pool, config, runtime):
@@ -454,6 +484,7 @@ def run_configured_controller(pool, config):
                     log_event("wifi_connecting")
                     wifi.radio.connect(config["ssid"], config["password"], timeout=12)
                     log_event("wifi_connected", ip=str(wifi.radio.ipv4_address))
+                service_outputs(runtime, online=False)
                 client = connect_mqtt(pool, config, runtime)
             if not wifi.radio.connected:
                 raise ConnectionError("Wi-Fi disconnected")
@@ -477,13 +508,18 @@ def run_configured_controller(pool, config):
 
 
 def main():
-    global gate_output, hold_led
+    global gate_output, hold_led, wifi_led, mqtt_led
+    # TEMPORARY STARTUP DIAGNOSTIC — remove with startup_pin_diagnostic().
+    startup_pin_diagnostic()
     log_event("boot", reset_reason=str(microcontroller.cpu.reset_reason))
-    hold_led = digitalio.DigitalInOut(HOLD_INDICATOR_PIN)
-    hold_led.switch_to_output(value=False)
-    gate_output = digitalio.DigitalInOut(TRANSISTOR_CONTROL_PIN)
+    outputs = []
     try:
-        gate_output.switch_to_output(value=False)
+        for pin in (TRANSISTOR_CONTROL_PIN, WIFI_INDICATOR_PIN,
+                    MQTT_INDICATOR_PIN, HOLD_INDICATOR_PIN):
+            output = digitalio.DigitalInOut(pin)
+            outputs.append(output)
+            output.switch_to_output(value=False)
+        gate_output, wifi_led, mqtt_led, hold_led = outputs
         service_outputs(None, online=False)
         config = add_settings_credentials(load_config())
         if config and mqtt_ready(config):
@@ -493,10 +529,11 @@ def main():
             log_event("provisioning")
             run_portal()
     finally:
-        gate_output.value = False
-        gate_output.deinit()
-        hold_led.value = False
-        hold_led.deinit()
+        for output in outputs:
+            output.value = False
+            output.deinit()
+        led.value = True  # Active-low heartbeat stops when the program exits.
+        led.deinit()
 
 
 if __name__ == "__main__":
