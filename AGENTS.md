@@ -1,5 +1,25 @@
 # XIAO CircuitPython development
 
+# FeatherWing fabrication
+
+- `hardware/featherwing/generate.py` is the design source of record. Incorporate
+  manual KiCad edits there before rebuilding. The logo source is
+  `hardware/featherwing/assets/drawbridge-silkscreen.svg`; its polylines become
+  actual F.Silkscreen geometry. PNG previews come from that same SVG.
+- `make featherwing-fab` (also `make featherwing-check`) regenerates the design,
+  runs ERC/DRC, and rebuilds **all** ZIPs and loose exports, including board and
+  schematic previews, logo, Gerbers, drills, BOM, positions, netlist, and reports.
+  Requires installed KiCad 10 plus the repo's Node/Playwright dependencies.
+- `artifacts/featherwing/` is disposable build output. Each successful build
+  replaces the entire directory, removing old attempts and extracted ZIPs.
+  Never store source/manual edits there. Other artifact directories are separate.
+  Failed builds preserve the previous complete release; check `manifest.json`
+  for its build timestamp and file hashes before uploading.
+- All three ZIPs are built together and every member is checked against its
+  loose counterpart. Run `.venv/bin/python -m unittest
+  test_suite.test_featherwing_fab` for the offline freshness/recovery tests,
+  then `make featherwing-fab` and inspect `board.png` and `silkscreen.svg`.
+
 # Drawbridge Firebase app
 
 - Read `firebase/README.md` for the web app's architecture and operational
@@ -32,7 +52,7 @@
   exact topic checks, App Check enforcement, deny-all Firestore client rules,
   request freshness, transactional deduplication, and per-device cooldown.
   Never add a production debug-token/test-gateway bypass. Browser mocks belong
-  only in `.artifacts/web-test`; `tools/build_web.mjs --test` creates it.
+  only in `artifacts/web-test`; `tools/build_web.mjs --test` creates it.
 - Keep MQTT credentials/CA in Secret Manager. `make web-secrets` imports the
   ignored local files without printing them; redeploy after rotating secrets.
   Public Firebase and App Check configs are ignored in `web/`. Never put
@@ -73,7 +93,7 @@
   libraries, and preserves unrelated device files/settings. Default destination
   is `/Volumes/CIRCUITPY`; override with `CIRCUITPY=/path`.
 - Keep credentials in ignored `.env`, the CA in ignored `emqxsl-ca.crt`, and
-  logs/results in ignored `.artifacts/`. Never print or commit secrets.
+  logs/results in ignored `artifacts/`. Never print or commit secrets.
   `tools/env_config.py` is the shared literal dotenv parser. Only
   `MQTT_USERNAME` and `MQTT_PASSWORD` go into device `settings.toml`;
   never copy REST API credentials. Settings are readable over USB.
@@ -130,7 +150,7 @@
   and stable boot/session. It never publishes, resets, or toggles the gate.
 - `make test-hardware-smoke` uses a 20-second observation for quick iteration.
   Customize with `TEST_ARGS='--duration 120 --port /dev/cu.usbmodem...'`.
-  Evidence: `.artifacts/indicators.log` and `.artifacts/indicators.json`.
+  Evidence: `artifacts/indicators.log` and `artifacts/indicators.json`.
   The old `tools/test_mqtt_cycles.py` publisher test is obsolete for this
   firmware (its passive log reader is reused).
 - Hardware checks measure software GPIO writes, not optical/electrical output.

@@ -115,7 +115,7 @@ use it after firmware, timing, network, or library changes.
 make test-hardware TEST_ARGS='--duration 120'
 ```
 
-Raw logs and a JSON summary are saved to ignored `.artifacts/indicators.*`.
+Raw logs and a JSON summary are saved to ignored `artifacts/indicators.*`.
 These are software GPIO measurements; confirm physical light output visually.
 Inactive-hold and disconnected behavior are covered by host tests; the live
 indicator check does not activate the gate by itself.

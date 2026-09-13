@@ -112,7 +112,7 @@ def main():
     parser.add_argument(
         "--timeout", type=float, default=40, help="Seconds to wait for first online heartbeat"
     )
-    parser.add_argument("--log", type=Path, default=Path(".artifacts/indicators.log"))
+    parser.add_argument("--log", type=Path, default=Path("artifacts/indicators.log"))
     args = parser.parse_args()
     if args.duration < 20 or args.timeout <= 0:
         parser.error("duration must be at least 20 seconds and timeout must be positive")

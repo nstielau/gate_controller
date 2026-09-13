@@ -1,10 +1,85 @@
 const {test, expect} = require("@playwright/test");
+const {readFile} = require("node:fs/promises");
+test("drawbridge moves continuously through edge-on with fixed hinges and attached chains", async ({page}) => {
+  await page.setContent(await readFile("web/drawbridge-loader.svg", "utf8"));
+  const motion = await page.evaluate(() => {
+    const svg = document.querySelector("svg");
+    svg.pauseAnimations();
+    const animations = document.getAnimations();
+    animations.forEach(animation => animation.pause());
+    let hingeError = 0, chainError = 0, biggestStep = 0, previous;
+    for (let frame = 0; frame <= 240; frame++) {
+      const time = frame / 60;
+      svg.setCurrentTime(time);
+      animations.forEach(animation => { animation.currentTime = time * 1000; });
+      const matrix = document.querySelector("#bridge-texture").getCTM();
+      const project = (x, y) => new DOMPoint(x, y).matrixTransform(matrix);
+      for (const [x,y] of [[54,77],[74,85]]) {
+        const point = project(x,y);
+        hingeError = Math.max(hingeError, Math.hypot(point.x-x,point.y-y));
+      }
+      const tip = project(44,60), chain = document.querySelector("line");
+      chainError = Math.max(chainError, Math.hypot(tip.x-chain.x2.animVal.value, tip.y-chain.y2.animVal.value));
+      if (previous) biggestStep = Math.max(biggestStep, Math.hypot(tip.x-previous.x,tip.y-previous.y));
+      previous = tip;
+    }
+    return {hingeError,chainError,biggestStep};
+  });
+  expect(motion.hingeError).toBeLessThan(.01);
+  expect(motion.chainError).toBeLessThan(.03);
+  expect(motion.biggestStep).toBeGreaterThan(.1);
+  expect(motion.biggestStep).toBeLessThan(1);
+});
 test("startup errors stay visible instead of leaving a blank page", async ({page}) => {
   await page.addInitScript(() => { window.__scenario = "startup-failure"; });
   await page.goto("/");
   const message = page.locator("#user-state");
   await expect(message).toHaveText("Secure connection couldn't start. Reconnect and reload.");
   await expect(message).toBeInViewport();
+  await expect(page.locator("#controls")).toBeHidden();
+});
+test("centered drawbridge loader animates while securely connecting and loading devices", async ({page}) => {
+  await page.addInitScript(() => { window.__scenario = "loading"; });
+  await page.goto("/");
+  const loader = page.locator("#loading-state");
+  await expect(loader).toBeVisible();
+  await expect(page.locator("#loading-message")).toHaveText("Securely Connecting");
+  const icon = page.locator(".drawbridge-loader img");
+  await expect.poll(() => icon.evaluate(image => image.complete && image.naturalWidth === 128)).toBe(true);
+  const firstFrame = await icon.screenshot();
+  await page.waitForTimeout(550);
+  expect((await icon.screenshot()).equals(firstFrame)).toBe(false);
+  const aligned = await page.evaluate(() => {
+    const icon = document.querySelector(".drawbridge-loader").getBoundingClientRect();
+    const text = document.querySelector("#loading-message").getBoundingClientRect();
+    return Math.abs(icon.x + icon.width / 2 - text.x - text.width / 2) < 1
+      && document.documentElement.scrollHeight <= innerHeight;
+  });
+  expect(aligned).toBe(true);
+  await page.evaluate(() => window.__releaseGateway());
+  await expect(page.locator("#loading-message")).toHaveText("Loading devices");
+  await expect(page.locator(".drawbridge-loader")).toBeVisible();
+  await expect(loader).toBeInViewport();
+  await page.evaluate(() => window.__releaseDevices());
+  await expect(loader).toBeHidden({timeout: 1000});
+  await expect(page.locator("#controls")).toBeVisible();
+});
+test("reduced motion displays a still castle during loading", async ({page}) => {
+  await page.emulateMedia({reducedMotion: "reduce"});
+  await page.addInitScript(() => { window.__scenario = "loading"; });
+  await page.goto("/");
+  const icon = page.locator(".drawbridge-loader img");
+  await expect.poll(() => icon.evaluate(image => image.complete && image.naturalWidth === 128)).toBe(true);
+  const firstFrame = await icon.screenshot();
+  await page.waitForTimeout(300);
+  expect((await icon.screenshot()).equals(firstFrame)).toBe(true);
+});
+test("failed device loading dismisses the loader and shows the error", async ({page}) => {
+  await page.addInitScript(() => { window.__scenario = "load-failure"; });
+  await page.goto("/");
+  await expect(page.locator("#loading-state")).toBeHidden();
+  await expect(page.locator("#user-state")).toBeVisible();
+  await expect(page.locator("#user-state")).toHaveText("Couldn't load gate access.");
   await expect(page.locator("#controls")).toBeHidden();
 });
 test("signed-out and unassigned users cannot send commands", async ({page}) => {
@@ -52,7 +127,7 @@ test("all durations, device selection, double tap prevention, and sign-out", asy
   expect(new Set(commands.map(c => c.requestId)).size).toBe(5);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBeTruthy();
-  await page.screenshot({path: ".artifacts/drawbridge-" + test.info().project.name + ".png", fullPage: true});
+  await page.screenshot({path: "artifacts/drawbridge-" + test.info().project.name + ".png", fullPage: true});
   await page.locator("#account-menu-button").click();
   await page.locator("#sign-out").click();
   await expect(page.locator("#controls")).toBeHidden();

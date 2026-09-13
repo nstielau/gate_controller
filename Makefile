@@ -6,7 +6,7 @@ CONSOLE_ARGS ?=
 TEST_ARGS ?=
 JAVA_BIN ?= /opt/homebrew/opt/openjdk@21/bin
 
-.PHONY: setup check lint precommit-install precommit test test-hardware test-hardware-smoke deploy status console fritzing fritzing-preview hold
+.PHONY: setup check lint precommit-install precommit test test-hardware test-hardware-smoke deploy status console fritzing fritzing-preview hold featherwing-check featherwing-fab
 
 setup:
 	uv venv --allow-existing .venv
@@ -22,16 +22,21 @@ precommit:
 	uvx --from pre-commit pre-commit run --all-files
 
 fritzing:
-	uv run --cache-dir .artifacts/uv-cache tools/make_fritzing.py
+	uv run --cache-dir artifacts/uv-cache tools/make_fritzing.py
 
 fritzing-preview: fritzing
-	mkdir -p .artifacts/fritzing-mini
-	cp docs/xiao-breadboard.fzz .artifacts/fritzing-mini/xiao-breadboard.fzz
-	/Applications/Fritzing.app/Contents/MacOS/Fritzing -svg .artifacts/fritzing-mini > .artifacts/fritzing-mini/export.log 2>&1
-	cp .artifacts/fritzing-mini/xiao-breadboard_breadboard.svg docs/xiao-mini-breadboard.svg
+	mkdir -p artifacts/fritzing-mini
+	cp docs/xiao-breadboard.fzz artifacts/fritzing-mini/xiao-breadboard.fzz
+	/Applications/Fritzing.app/Contents/MacOS/Fritzing -svg artifacts/fritzing-mini > artifacts/fritzing-mini/export.log 2>&1
+	cp artifacts/fritzing-mini/xiao-breadboard_breadboard.svg docs/xiao-mini-breadboard.svg
 
 hold:
 	$(PYTHON) tools/mqtt_hold.py "$(DURATION)" $(if $(DEVICE_ID),--device-id "$(DEVICE_ID)",)
+
+featherwing-check:
+	$(PYTHON) tools/featherwing_fab.py
+
+featherwing-fab: featherwing-check
 
 check:
 	$(PYTHON) -c 'import ast, pathlib; files = [*pathlib.Path("$(APP_DIR)").rglob("*.py"), *pathlib.Path("tools").glob("*.py"), *pathlib.Path("test_suite").glob("*.py")]; [ast.parse(p.read_text(), filename=str(p)) for p in files]; print("Syntax OK:", len(files), "files")'

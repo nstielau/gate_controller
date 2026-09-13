@@ -147,7 +147,7 @@ def main():
     parser.add_argument("--intervals", type=int, nargs="+", default=[2000, 300])
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--soak", type=float, default=70)
-    parser.add_argument("--log", type=Path, default=Path(".artifacts/mqtt-cycles.log"))
+    parser.add_argument("--log", type=Path, default=Path("artifacts/mqtt-cycles.log"))
     args = parser.parse_args()
     if args.cycles < 1 or args.timeout <= 0 or args.soak < 0 or any(not 25 <= n <= 60000 for n in args.intervals):
         parser.error("invalid cycles, timeout, soak or intervals")

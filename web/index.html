@@ -46,7 +46,16 @@
     <p>Secure, timed access to your gate.</p>
     <button id="sign-in">Login with Google</button>
   </section>
-  <p id="user-state">Connecting securely…</p>
+  <section id="loading-state" class="loading-state" role="status" aria-live="polite" aria-labelledby="loading-message">
+    <div class="drawbridge-loader" aria-hidden="true">
+      <picture>
+        <source media="(prefers-reduced-motion: reduce)" srcset="/assets/drawbridge-castle.png">
+        <img src="/assets/drawbridge-loader.svg" width="128" height="128" alt="">
+      </picture>
+    </div>
+    <p id="loading-message">Securely Connecting</p>
+  </section>
+  <p id="user-state" hidden></p>
   <section id="controls" hidden aria-labelledby="hold-heading">
     <label for="device">Your gate</label><select id="device"></select>
     <p id="device-metric" class="hint device-metric"></p>

@@ -3,7 +3,7 @@ import {readFile, writeFile, mkdir, rm, copyFile} from "node:fs/promises";
 import {createHash} from "node:crypto";
 import {gzipSync} from "node:zlib";
 const test = process.argv.includes("--test");
-const out = test ? ".artifacts/web-test" : "web/dist";
+const out = test ? "artifacts/web-test" : "web/dist";
 if (!test) {
   for (const file of ["web/firebase-config.js", "web/app-check-config.js"]) {
     const text = await readFile(file, "utf8");
@@ -23,13 +23,17 @@ const result = await build({
 const outputs = Object.keys(result.metafile.outputs);
 const js = "/" + outputs.find(p => p.endsWith(".js")).slice(out.length + 1);
 const css = "/" + outputs.find(p => p.endsWith(".css")).slice(out.length + 1);
-const html = (await readFile("web/index.html", "utf8")).replace("/app.js", js).replace("/styles.css", css);
+await import("./build_loader_artwork.mjs");
+const loader = await readFile("web/drawbridge-loader.svg");
+const loaderPath = "/assets/drawbridge-loader-" + createHash("sha256").update(loader).digest("hex").slice(0, 12) + ".svg";
+await writeFile(out + loaderPath, loader);
+const html = (await readFile("web/index.html", "utf8")).replace("/app.js", js).replace("/styles.css", css).replace("/assets/drawbridge-loader.svg", loaderPath);
 await writeFile(out + "/index.html", html);
 await copyFile("web/manifest.webmanifest", out + "/manifest.webmanifest");
 await copyFile("web/drawbridge-castle-128.png", out + "/assets/drawbridge-castle.png");
 for (const size of [192, 512]) await copyFile(`web/icons/castle-${size}.png`, `${out}/castle-${size}.png`);
 if (test) await copyFile("web/test/gateway.js", out + "/gateway.js");
-const assets = ["/", "/index.html", js, css, "/assets/drawbridge-castle.png", "/castle-192.png", "/castle-512.png", "/manifest.webmanifest", ...(test ? ["/gateway.js"] : [])];
+const assets = ["/", "/index.html", js, css, loaderPath, "/assets/drawbridge-castle.png", "/castle-192.png", "/castle-512.png", "/manifest.webmanifest", ...(test ? ["/gateway.js"] : [])];
 const sw = await readFile("web/service-worker.js", "utf8");
 const digest = createHash("sha256").update(sw);
 for (const path of assets.filter(p => p !== "/")) digest.update(await readFile(out + path));

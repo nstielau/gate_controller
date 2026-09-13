@@ -1,8 +1,11 @@
 __pycache__
+**/~*.lck
+**/.history/
+.DS_Store
 .env
 emqxsl-ca.crt
 .venv/
-.artifacts/
+artifacts/
 settings.toml
 web/firebase-config.js
 firebase/functions/node_modules/

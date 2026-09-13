@@ -15,6 +15,16 @@ Home-screen icons are checked-in exports in `web/icons/`; regenerate them with
 `node tools/export_castle_icons.mjs` (requires the Playwright Chromium browser
 installed by `make web-setup`). Regular builds only copy these files.
 
+The centered loading indicator uses the original icon's pixels, with its bridge
+rotating about the doorway hinge and suspension chains following the free edge.
+`tools/build_loader_artwork.mjs` builds `web/drawbridge-loader.svg` from the
+original icon and `web/drawbridge-loader-background.png` (an image-edited patch
+visible only where the old bridge/chains were). Reduced-motion users see the
+original still icon. Web builds regenerate, hash, and cache the loader asset.
+`node tools/render_loader_gif.mjs` refreshes `artifacts/drawbridge-loader.gif`
+with a complete four-second cycle at 50 fps and a live SVG preview at
+`artifacts/drawbridge-loader.html`; this preview needs Playwright and ffmpeg.
+
 To name a gate, select it and tap **Edit nickname**, enter a name, then tap
 **Save nickname**. Names are shared with everyone assigned to that gate and
 persist across visits. Any assigned user can rename an enabled gate. Names
@@ -106,7 +116,7 @@ hosts. On macOS it checks Java via the Homebrew path; override
 to the real gate. Existing `make test` and `make deploy` still test/deploy the
 CircuitPython firmware independently.
 
-The browser tests use a separate build in `.artifacts/web-test`. Production
+The browser tests use a separate build in `artifacts/web-test`. Production
 builds always use the real Firebase gateway and require both ignored public
 config files. Never deploy the test build. Production output is `web/dist`.
 

@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="14mm" height="14mm" viewBox="0 0 140 140">
+  <title>Drawbridge: isometric castle and lowered bridge</title>
+  <desc>Single-color PCB artwork. Coordinates are imported directly into KiCad at 0.1 mm per unit.</desc>
+  <g fill="none" stroke="black" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round">
+    <!-- Gatehouse between the towers, with a stone arch and portcullis. -->
+    <polyline points="45,58 51,60 51,55 58,57 58,63 67,66 67,60 74,62 74,68 83,71 83,65 91,68 91,77"/>
+    <polyline points="45,66 91,82"/>
+    <polyline points="50,98 50,83 52,76 57,71 65,70 74,73 81,80 83,88 83,109"/>
+    <polyline points="56,100 56,84 59,78 65,76 72,79 77,85 77,107"/>
+    <polyline points="62,79 62,101"/>
+    <polyline points="69,81 69,104"/>
+    <polyline points="57,88 77,95"/>
+    <polyline points="57,96 77,103"/>
+    <!-- Lowered plank bridge: perspective, thick end beam, and chains. -->
+    <polyline points="51,98 85,110 64,132 29,119 51,98"/>
+    <polyline points="29,119 29,123 64,136 85,114 85,110"/>
+    <polyline points="64,132 64,136"/>
+    <polyline points="46,103 80,115"/>
+    <polyline points="41,108 75,120"/>
+    <polyline points="36,113 70,125"/>
+    <polyline points="48,80 32,116"/>
+    <polyline points="87,94 67,129"/>
+    <!-- Far tower, visible front and side faces. -->
+    <polyline points="14,30 37,38 49,30 49,98 37,106 14,98 14,30"/>
+    <polyline points="37,38 37,106"/>
+    <polyline points="14,47 37,55 49,47"/>
+    <polyline points="14,65 37,73 49,65"/>
+    <polyline points="14,83 37,91 49,83"/>
+    <polyline points="25,51 25,63"/>
+    <polyline points="22,68 22,81"/>
+    <polyline points="29,89 29,101"/>
+    <polyline points="43,52 43,65"/>
+    <polyline points="43,88 43,101"/>
+    <polyline points="22,42 22,49"/>
+    <!-- Far parapet: stepped battlements and top-plane depth. -->
+    <polyline points="11,28 11,19 18,21 18,27 24,29 24,23 31,25 31,31 37,33 37,27 43,23 43,17 52,20 52,30 37,40 11,31 11,28"/>
+    <polyline points="11,19 23,11 30,13 18,21"/>
+    <polyline points="24,23 36,15 43,17 31,25"/>
+    <polyline points="23,11 23,17"/>
+    <polyline points="30,13 30,19"/>
+    <polyline points="37,33 37,40"/>
+    <!-- Near tower, matching masonry and narrow window. -->
+    <polyline points="91,57 114,65 127,57 127,119 114,128 91,120 91,57"/>
+    <polyline points="114,65 114,128"/>
+    <polyline points="91,86 114,94 127,86"/>
+    <polyline points="91,104 114,112 127,104"/>
+    <polyline points="102,90 102,103"/>
+    <polyline points="100,109 100,122"/>
+    <polyline points="120,72 120,89"/>
+    <polyline points="120,99 120,108"/>
+    <polyline points="120,116 120,124"/>
+    <polyline points="99,79 99,69 102,67 105,71 105,81 99,79"/>
+    <!-- Near parapet and crenellations. -->
+    <polyline points="88,55 88,46 95,48 95,54 101,56 101,50 108,52 108,58 114,60 114,54 120,50 120,44 130,47 130,57 114,67 88,58 88,55"/>
+    <polyline points="88,46 101,38 108,40 95,48"/>
+    <polyline points="101,50 114,42 120,44 108,52"/>
+    <polyline points="101,38 101,44"/>
+    <polyline points="108,40 108,46"/>
+    <polyline points="114,60 114,67"/>
+  </g>
+</svg>

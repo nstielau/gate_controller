@@ -86,4 +86,4 @@ header positions, component lead alignment, and no duplicate occupied holes.
 The preview is exported by Fritzing itself to catch asset and wire-rendering
 errors. This is drawing validation, not an electrical measurement of an
 assembled breadboard. Export diagnostics are in ignored
-`.artifacts/fritzing-mini/export.log`.
+`artifacts/fritzing-mini/export.log`.

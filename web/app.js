@@ -5,6 +5,12 @@ const buttons = [...document.querySelectorAll("[data-duration]")];
 let gateway, user, busy = false, devices = [], generation = 0;
 let savingNickname = false;
 let countdownTimer;
+function showLoading(message) {
+  $("#loading-message").textContent = message;
+  $("#loading-state").hidden = false;
+  state.hidden = true;
+}
+function hideLoading() { $("#loading-state").hidden = true; }
 function showProfile(nextUser) {
   const photo = $("#profile-photo");
   const initial = $("#profile-initial");
@@ -100,8 +106,8 @@ async function loadDevices() {
   devices = [];
   controls.hidden = true;
   render();
-  if (!user) return;
-  state.textContent = "Loading your gates…";
+  if (!user) { hideLoading(); return; }
+  showLoading("Loading devices");
   try {
     const response = await gateway.listDevices();
     if (current !== generation) return;
@@ -114,9 +120,10 @@ async function loadDevices() {
     state.textContent = devices.length ? "" : "No gate access yet. Ask the administrator to add " + user.email + ".";
   } catch (error) {
     if (current !== generation) return;
+    state.hidden = false;
     state.textContent = "Couldn't load gate access.";
     result.textContent = error.message || "Reconnect and refresh access.";
-  }
+  } finally { if (current === generation) hideLoading(); }
   render();
 }
 $("#account-menu-button").onclick = toggleAccountMenu;
@@ -197,11 +204,13 @@ try {
     $("#signed-out-hero").hidden = !!user;
     $("#account-menu-button").hidden = !user;
     if (!user) closeAccountMenu();
-    if (!user) { ++generation; devices = []; controls.hidden = true; state.hidden = false; state.textContent = "Sign in to control your gate."; render(); }
+    if (!user) { ++generation; devices = []; controls.hidden = true; hideLoading(); state.hidden = false; state.textContent = "Sign in to control your gate."; render(); }
     else loadDevices();
   });
   render();
 } catch {
+  hideLoading();
+  state.hidden = false;
   state.textContent = "Secure connection couldn't start. Reconnect and reload.";
 }
 document.addEventListener("click", event => {

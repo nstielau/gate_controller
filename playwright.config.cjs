@@ -6,5 +6,5 @@ module.exports = defineConfig({
     {name: "mobile-chromium", use: {...devices["Pixel 7"]}},
     {name: "mobile-webkit", use: {...devices["iPhone 13"]}}
   ],
-  webServer: {command: "node tools/build_web.mjs --test && .venv/bin/python -m http.server 4173 --bind 127.0.0.1 --directory .artifacts/web-test", url: "http://127.0.0.1:4173", reuseExistingServer: false}
+  webServer: {command: "node tools/build_web.mjs --test && .venv/bin/python -m http.server 4173 --bind 127.0.0.1 --directory artifacts/web-test", url: "http://127.0.0.1:4173", reuseExistingServer: false}
 });

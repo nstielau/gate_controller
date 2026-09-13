@@ -1,6 +1,7 @@
-// Only copied into .artifacts/web-test by the explicit --test build.
+// Only copied into artifacts/web-test by the explicit --test build.
 export async function createGateway() {
   const scenario = window.__scenario || "authorized";
+  if (scenario === "loading") await new Promise(resolve => { window.__releaseGateway = resolve; });
   if (scenario === "startup-failure") throw new Error("Gateway initialization failed");
   let callback;
   const devices = [{id: "test-device", name: "Garden gate"}, {id: "second-device", name: "Driveway"}];
@@ -8,7 +9,11 @@ export async function createGateway() {
     onUser(fn) { callback = fn; fn(scenario === "signed-out" ? null : {email: "operator@example.test", photoURL: "https://example.test/profile.jpg"}); },
     async signIn() { callback({email: "operator@example.test", photoURL: "https://example.test/profile.jpg"}); },
     async signOut() { callback(null); },
-    async listDevices() { return {devices: scenario === "unauthorized" ? [] : devices}; },
+    async listDevices() {
+      if (scenario === "loading") await new Promise(resolve => { window.__releaseDevices = resolve; });
+      if (scenario === "load-failure") throw new Error("Reconnect and refresh access.");
+      return {devices: scenario === "unauthorized" ? [] : devices};
+    },
     async renameGate({deviceId, nickname}) {
       if (scenario === "failure") throw new Error("Network disconnected");
       const device = devices.find(d => d.id === deviceId);
