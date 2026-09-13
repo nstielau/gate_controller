@@ -57,8 +57,8 @@
 
 # CircuitPython workflow
 
-- Source of record: `circuitpython/`, never the mounted board. Preserve the
-  unrelated Raspberry Pi application and hardware design files.
+- Source of record: `circuitpython/`, never the mounted board. The former
+  Balena/Raspberry Pi GPIO runtime was removed; do not reintroduce it.
 - Use **uv**: `make setup` creates `.venv` and syncs
   `tools/requirements-dev.lock`. Host tools use `.venv/bin/python`.
 - Run `make test` before deployment; `make deploy` also runs it.

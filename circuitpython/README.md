@@ -51,7 +51,7 @@ Put the downloaded CA at ignored `emqxsl-ca.crt` and credentials in ignored
 
 ```dotenv
 MQTT_USERNAME=your-device-username
-MQTT_PASSWORD='your-device-password'
+MQTT_PASSWORD='your-device-password'  # pragma: allowlist secret
 ```
 
 Deployment copies the CA to `/certs/emqxsl-ca.crt` and renders only MQTT

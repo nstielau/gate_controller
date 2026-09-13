@@ -1,6 +1,7 @@
 # Gate Controller
 
-Alexa-enabled driveway gate controller with custom FeatherWing PCB.
+Secure, timed gate control using a Seeed Studio XIAO ESP32-S3 running
+CircuitPython and a Firebase web app.
 
 The [Drawbridge mobile app](https://drawbridge-45487.firebaseapp.com) uses Google
 sign-in to send timed MQTT holds: 1m, 15m, 1h, 6h, or End hold. Connection
@@ -42,35 +43,14 @@ Fritzing project and exact hole assignments. The transistor collector
 LED is a disconnected bench load; the prospective LiftMaster eyes interface
 has not been validated. Current firmware ignores legacy MQTT blink commands.
 
-## Software
-
-Python server running on a Raspberry Pi (or Feather with WiFi) that controls
-the gate via GPIO. Supports Alexa voice commands and HTTP API.
-
-### API
-
-- `POST /hold` — hold gate open (body: seconds, default 1)
-- `POST /hold/cancel` — release gate
-- `GET /hold` — check if gate is held
-
-### Running
-
-```bash
-docker build -t gate_controller .
-docker run -p 80:80 --privileged gate_controller
-```
-
 ## Hardware
 
-FeatherWing PCB in `hardware/` — designed in KiCad.
+KiCad source files in `hardware/` are retained as a board-design reference.
 
 ### Circuit
 
-- **NPN switch**: GPIO A0 → 1kΩ → 2N3904 base; collector/emitter across
-  LiftMaster dry-contact input via screw terminal
-- **Gate LED**: Green 0805 LED on A0 — lights when gate is held open
-- **NeoPixel**: WS2812B on A1 — firmware-controlled RGB status
-- **Bypass cap**: 100nF across WS2812B power rails
+- See [circuitpython/README.md](circuitpython/README.md) for the current XIAO
+  pin assignments and safe bench wiring.
 
 ### BOM
 

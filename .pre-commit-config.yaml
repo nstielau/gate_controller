@@ -12,8 +12,10 @@ repos:
       - id: check-json
       - id: check-xml
       - id: end-of-file-fixer
+        exclude: '^(circuitpython/lib/\.gitkeep|hardware/|docs/superpowers/)'
       - id: mixed-line-ending
       - id: trailing-whitespace
+        exclude: '^(hardware/|docs/superpowers/)'
       - id: detect-private-key
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
@@ -26,3 +28,4 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+        files: '^(circuitpython/code\.py|circuitpython/lib/gate_indicators\.py|test_suite/test_indicators\.py|tools/test_indicators\.py)$'

@@ -14,7 +14,7 @@ class IndicatorTests(unittest.TestCase):
             state = Indicators(0)
             for now, wifi, mqtt, expected in [
                 (0, False, False, (True, False)),
-                (.5, False, False, (False, False)),
+                (0.5, False, False, (False, False)),
                 (1, True, False, (True, True)),
                 (1.5, True, False, (True, False)),
                 (2, True, True, (True, True)),
@@ -29,8 +29,15 @@ class IndicatorTests(unittest.TestCase):
 
     def test_alive_pulses_do_not_restart_when_connectivity_or_hold_changes(self):
         state = Indicators(0)
-        for now, expected in [(0, True), (.099, True), (.101, False),
-                              (1, False), (2, True), (2.101, False), (100, True)]:
+        for now, expected in [
+            (0, True),
+            (0.099, True),
+            (0.101, False),
+            (1, False),
+            (2, True),
+            (2.101, False),
+            (100, True),
+        ]:
             state.tick(now, now >= 1, now >= 2, now >= 2)
             self.assertEqual(state.alive_on, expected)
         self.assertGreater(state.alive_edges, 0)
@@ -52,7 +59,9 @@ class IndicatorTests(unittest.TestCase):
 
     def test_hold_duration_expires_and_zero_cancels(self):
         state = HoldState()
-        state.apply('{"version":1,"type":"hold_gate","duration_seconds":3600,"command_id":"hour"}', 10)
+        state.apply(
+            '{"version":1,"type":"hold_gate","duration_seconds":3600,"command_id":"hour"}', 10
+        )
         self.assertTrue(state.active(10))
         self.assertAlmostEqual(state.remaining(3610), 0)
         self.assertFalse(state.active(3610))
@@ -83,13 +92,17 @@ class OutputTests(unittest.TestCase):
     def test_invalid_legacy_command_cannot_change_indicators(self):
         client = SimpleNamespace(user_data={"command_topic": "test"})
         with patch.object(self.app, "log_event") as log:
-            self.app.on_mqtt_message(client, "test", '{"type":"set_blink_interval","blink_interval_ms":2000}')
+            self.app.on_mqtt_message(
+                client, "test", '{"type":"set_blink_interval","blink_interval_ms":2000}'
+            )
             self.assertEqual(log.call_args.args[0], "command_rejected")
 
     def test_retained_hold_command_is_rejected(self):
         client = SimpleNamespace(user_data={"command_topic": "test"}, message_retained=True)
         with patch.object(self.app, "log_event") as log:
-            self.app.on_mqtt_message(client, "test", '{"version":1,"type":"hold_gate","duration_seconds":10}')
+            self.app.on_mqtt_message(
+                client, "test", '{"version":1,"type":"hold_gate","duration_seconds":10}'
+            )
             self.assertEqual(log.call_args.args[0], "command_rejected")
 
     def test_main_runs_temporary_pin_diagnostic_then_claims_runtime_outputs(self):
@@ -103,16 +116,27 @@ class OutputTests(unittest.TestCase):
 
         self.app.digitalio.DigitalInOut.reset_mock()
         self.app.digitalio.DigitalInOut.side_effect = make_output
-        with patch.object(self.app, "log_event"), patch.object(self.app, "service_outputs"), \
-             patch.object(self.app.time, "sleep") as sleep, \
-             patch.object(self.app, "load_config", return_value=None), \
-             patch.object(self.app, "run_portal", side_effect=KeyboardInterrupt):
+        with (
+            patch.object(self.app, "log_event"),
+            patch.object(self.app, "service_outputs"),
+            patch.object(self.app.time, "sleep") as sleep,
+            patch.object(self.app, "load_config", return_value=None),
+            patch.object(self.app, "run_portal", side_effect=KeyboardInterrupt),
+        ):
             with self.assertRaises(KeyboardInterrupt):
                 self.app.main()
-        self.assertEqual([c.args[0] for c in self.app.digitalio.DigitalInOut.call_args_list],
-                         [self.app.board.D0, self.app.board.D1, self.app.board.D2,
-                          self.app.board.D10, self.app.board.D0,
-                          self.app.board.D1, self.app.board.D2])
+        self.assertEqual(
+            [c.args[0] for c in self.app.digitalio.DigitalInOut.call_args_list],
+            [
+                self.app.board.D0,
+                self.app.board.D1,
+                self.app.board.D2,
+                self.app.board.D10,
+                self.app.board.D0,
+                self.app.board.D1,
+                self.app.board.D2,
+            ],
+        )
         self.assertEqual(sleep.call_args_list, [call(0.2), call(0.2)] * 3)
         for _, output in outputs:
             output.switch_to_output.assert_called_once_with(value=False)

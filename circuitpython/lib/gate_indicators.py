@@ -19,8 +19,11 @@ class Indicators:
 
     def tick(self, now, wifi_connected, mqtt_connected, holding):
         mqtt_connected = bool(wifi_connected and mqtt_connected)
-        changed = (wifi_connected != self.wifi_connected
-                   or mqtt_connected != self.mqtt_connected or holding != self.holding)
+        changed = (
+            wifi_connected != self.wifi_connected
+            or mqtt_connected != self.mqtt_connected
+            or holding != self.holding
+        )
         alive_on = (now - self.alive_epoch) % 2 < 0.1
         if alive_on != self.alive_on:
             self.alive_edges += 1
@@ -33,8 +36,7 @@ class Indicators:
         self.wifi_connected = wifi_connected
         self.mqtt_connected = mqtt_connected
         self.wifi_on = wifi_connected or (now - self.wifi_epoch) % 1 < 0.5
-        self.mqtt_on = wifi_connected and (
-            mqtt_connected or (now - self.mqtt_epoch) % 1 < 0.5)
+        self.mqtt_on = wifi_connected and (mqtt_connected or (now - self.mqtt_epoch) % 1 < 0.5)
 
         elapsed = None
         if holding != self.holding:

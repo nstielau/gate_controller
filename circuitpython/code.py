@@ -88,13 +88,17 @@ def service_status_led(wifi_connected, mqtt_connected, gate_active, now):
 
 
 def indicator_status():
-    return {"wifi_connected": bool(indicators.wifi_connected),
-            "mqtt_connected": bool(indicators.mqtt_connected),
-            "wifi_led_on": wifi_led.value, "mqtt_led_on": mqtt_led.value,
-            "alive_edge_count": indicators.alive_edges,
-            "transistor_high": bool(gate_output.value),
-            "onboard_led_on": not led.value, "hold_led_on": hold_led.value,
-            "hold_edge_count": indicators.hold_edges}
+    return {
+        "wifi_connected": bool(indicators.wifi_connected),
+        "mqtt_connected": bool(indicators.mqtt_connected),
+        "wifi_led_on": wifi_led.value,
+        "mqtt_led_on": mqtt_led.value,
+        "alive_edge_count": indicators.alive_edges,
+        "transistor_high": bool(gate_output.value),
+        "onboard_led_on": not led.value,
+        "hold_led_on": hold_led.value,
+        "hold_edge_count": indicators.hold_edges,
+    }
 
 
 def device_suffix():
@@ -117,7 +121,7 @@ def load_config():
     if magic == CONFIG_MAGIC:
         limit = CONFIG_SIZE
         start = len(CONFIG_MAGIC) + 2
-        size = int.from_bytes(bytes(nvm[len(CONFIG_MAGIC):start]), "big")
+        size = int.from_bytes(bytes(nvm[len(CONFIG_MAGIC) : start]), "big")
     elif magic in (OLD_CONFIG_MAGIC, b"GATE2"):
         limit = OLD_CONFIG_SIZE if magic == OLD_CONFIG_MAGIC else CONFIG_SIZE
         start = len(CONFIG_MAGIC) + 1
@@ -161,7 +165,7 @@ def save_config(config):
     record = bytearray(CONFIG_SIZE)
     record[: len(CONFIG_MAGIC)] = CONFIG_MAGIC
     start = len(CONFIG_MAGIC) + 2
-    record[len(CONFIG_MAGIC):start] = len(payload).to_bytes(2, "big")
+    record[len(CONFIG_MAGIC) : start] = len(payload).to_bytes(2, "big")
     record[start : start + len(payload)] = payload
     microcontroller.nvm[:CONFIG_SIZE] = record
 
@@ -236,8 +240,11 @@ def config_from_form(fields):
     submitted_ssid = fields.get("ssid", "").strip()
     submitted_password = fields.get("password", "")
     ssid = submitted_ssid or previous.get("ssid", "")
-    password = (submitted_password if submitted_ssid and submitted_ssid != previous.get("ssid")
-                else submitted_password or previous.get("password", ""))
+    password = (
+        submitted_password
+        if submitted_ssid and submitted_ssid != previous.get("ssid")
+        else submitted_password or previous.get("password", "")
+    )
     if not ssid:
         raise ValueError("Enter a Wi-Fi network name.")
     if password and not 8 <= len(password) <= 63:
@@ -306,9 +313,15 @@ def service_http(server):
         header, body = read_http_request(client)
         request_line = header.split(b"\r\n", 1)[0].split(b" ")
 
-        if len(request_line) >= 2 and request_line[0] == b"POST" and request_line[1] == b"/configure":
+        if (
+            len(request_line) >= 2
+            and request_line[0] == b"POST"
+            and request_line[1] == b"/configure"
+        ):
             save_config(config_from_form(parse_form(body)))
-            send_response(client, page("Saved. The controller is restarting and will connect securely."))
+            send_response(
+                client, page("Saved. The controller is restarting and will connect securely.")
+            )
             time.sleep(1)
             supervisor.reload()
         else:
@@ -345,8 +358,13 @@ def service_dns(dns_socket, ap_ip):
     question = query[12 : end + 5]
     address_bytes = bytes(int(part) for part in ap_ip.split("."))
     response = (
-        query[:2] + b"\x81\x80" + query[4:6] + b"\x00\x01\x00\x00\x00\x00"
-        + question + b"\xC0\x0C\x00\x01\x00\x01\x00\x00\x00\x1E\x00\x04" + address_bytes
+        query[:2]
+        + b"\x81\x80"
+        + query[4:6]
+        + b"\x00\x01\x00\x00\x00\x00"
+        + question
+        + b"\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x1e\x00\x04"
+        + address_bytes
     )
     try:
         dns_socket.sendto(response, client_address)
@@ -370,12 +388,19 @@ def log_event(event, **fields):
 
 
 def status_payload(runtime):
-    return json.dumps({
-        "version": 1, "type": "device_status", "state": "online",
-        "device_id": device_suffix().lower(), "ip": str(wifi.radio.ipv4_address),
-        "boot_id": BOOT_ID, "uptime_ms": int(time.monotonic() * 1000),
-        "indicators": indicator_status(), "hold_remaining_seconds": hold.remaining(time.monotonic()),
-    })
+    return json.dumps(
+        {
+            "version": 1,
+            "type": "device_status",
+            "state": "online",
+            "device_id": device_suffix().lower(),
+            "ip": str(wifi.radio.ipv4_address),
+            "boot_id": BOOT_ID,
+            "uptime_ms": int(time.monotonic() * 1000),
+            "indicators": indicator_status(),
+            "hold_remaining_seconds": hold.remaining(time.monotonic()),
+        }
+    )
 
 
 def on_mqtt_message(client, topic, message):
@@ -391,8 +416,7 @@ def on_mqtt_message(client, topic, message):
         log_event("command_rejected", reason="invalid hold schema")
         return
     client.user_data["dirty"] = True
-    log_event("hold_applied", command_id=hold.command_id,
-              duration_seconds=hold.duration_seconds)
+    log_event("hold_applied", command_id=hold.command_id, duration_seconds=hold.duration_seconds)
 
 
 def service_outputs(runtime, online):
@@ -407,16 +431,32 @@ def connect_mqtt(pool, config, runtime):
     with open(EMQX_CA_FILE, "r") as certificate_file:
         ssl_context.load_verify_locations(cadata=certificate_file.read())
     client = GateMQTT(
-        broker=MQTT_BROKER, port=MQTT_PORT,
-        username=config["mqtt_username"], password=config["mqtt_password"],
-        client_id="gate-controller-" + device_suffix().lower(), is_ssl=True,
-        socket_pool=pool, ssl_context=ssl_context, connect_retries=1,
-        socket_timeout=NETWORK_SECONDS, recv_timeout=10, user_data=runtime,
+        broker=MQTT_BROKER,
+        port=MQTT_PORT,
+        username=config["mqtt_username"],
+        password=config["mqtt_password"],
+        client_id="gate-controller-" + device_suffix().lower(),
+        is_ssl=True,
+        socket_pool=pool,
+        ssl_context=ssl_context,
+        connect_retries=1,
+        socket_timeout=NETWORK_SECONDS,
+        recv_timeout=10,
+        user_data=runtime,
     )
-    client.will_set(config["mqtt_topic"], json.dumps({
-        "version": 1, "type": "device_status", "state": "offline",
-        "device_id": device_suffix().lower(), "boot_id": BOOT_ID,
-    }), retain=True)
+    client.will_set(
+        config["mqtt_topic"],
+        json.dumps(
+            {
+                "version": 1,
+                "type": "device_status",
+                "state": "offline",
+                "device_id": device_suffix().lower(),
+                "boot_id": BOOT_ID,
+            }
+        ),
+        retain=True,
+    )
     client.on_message = on_mqtt_message
     try:
         client.connect()
@@ -514,8 +554,12 @@ def main():
     log_event("boot", reset_reason=str(microcontroller.cpu.reset_reason))
     outputs = []
     try:
-        for pin in (TRANSISTOR_CONTROL_PIN, WIFI_INDICATOR_PIN,
-                    MQTT_INDICATOR_PIN, HOLD_INDICATOR_PIN):
+        for pin in (
+            TRANSISTOR_CONTROL_PIN,
+            WIFI_INDICATOR_PIN,
+            MQTT_INDICATOR_PIN,
+            HOLD_INDICATOR_PIN,
+        ):
             output = digitalio.DigitalInOut(pin)
             outputs.append(output)
             output.switch_to_output(value=False)

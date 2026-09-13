@@ -1,0 +1,8 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Browser access goes through authenticated, App Check protected functions.
+    // Admin SDK access is governed by project IAM.
+    match /{document=**} { allow read, write: if false; }
+  }
+}

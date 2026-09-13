@@ -31,17 +31,26 @@ def run(args):
                     try:
                         event = monitor.next_event(min(deadline, time.monotonic() + 15))
                     except AssertionError:
-                        if started is not None and time.monotonic() >= deadline and time.monotonic() - last_heartbeat < 15:
+                        if (
+                            started is not None
+                            and time.monotonic() >= deadline
+                            and time.monotonic() - last_heartbeat < 15
+                        ):
                             break
                         raise
                     verify_event(event, boot_id)
                     if event["event"] == "heartbeat" and event.get("mqtt_connected"):
-                        if not all(event.get(key) for key in
-                                   ("wifi_connected", "wifi_led_on", "mqtt_led_on")):
+                        if not all(
+                            event.get(key)
+                            for key in ("wifi_connected", "wifi_led_on", "mqtt_led_on")
+                        ):
                             raise AssertionError("Expected connected Wi-Fi/D0 and MQTT/D1 LEDs ON")
                         alive_edges = event["alive_edge_count"]
-                        if (last_alive_edges is not None and alive_edges <= last_alive_edges
-                                and time.monotonic() - last_alive_change > 5):
+                        if (
+                            last_alive_edges is not None
+                            and alive_edges <= last_alive_edges
+                            and time.monotonic() - last_alive_change > 5
+                        ):
                             raise AssertionError("Onboard heartbeat stopped toggling")
                         if last_alive_edges is None or alive_edges > last_alive_edges:
                             last_alive_change = time.monotonic()
@@ -56,14 +65,20 @@ def run(args):
                         last_heartbeat = time.monotonic()
                         previous_sample = None  # logging samples are separated by unlogged edges
                         heartbeats += 1
-                        print("Connected: D0/D1 ON, alive edges {}, D10 {}, D2 edges {}".format(
-                            alive_edges, "HIGH" if event["transistor_high"] else "LOW", edges), flush=True)
+                        print(
+                            "Connected: D0/D1 ON, alive edges {}, D10 {}, D2 edges {}".format(
+                                alive_edges, "HIGH" if event["transistor_high"] else "LOW", edges
+                            ),
+                            flush=True,
+                        )
                     elif boot_id is not None and event["event"] == "indicator_edge":
                         if event.get("pin") != "D2":
                             raise AssertionError("Unexpected indicator pin")
                         elapsed = event["elapsed_ms"]
                         if not 125 <= elapsed <= 200:
-                            raise AssertionError("D2 transition took {} ms; expected 125–200 ms".format(elapsed))
+                            raise AssertionError(
+                                "D2 transition took {} ms; expected 125–200 ms".format(elapsed)
+                            )
                         if previous_sample is not None and event["on"] == previous_sample:
                             raise AssertionError("D2 samples did not alternate")
                         previous_sample = event["on"]
@@ -83,15 +98,20 @@ def run(args):
         raise
     finally:
         args.log.with_suffix(".json").write_text(json.dumps(summary, indent=2) + "\n")
-    print("PASS: {} s, {} heartbeats, {} D2 samples; logs {}".format(
-        args.duration, heartbeats, len(samples), args.log))
+    print(
+        "PASS: {} s, {} heartbeats, {} D2 samples; logs {}".format(
+            args.duration, heartbeats, len(samples), args.log
+        )
+    )
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", help="USB serial device; auto-detected by default")
     parser.add_argument("--duration", type=float, default=70)
-    parser.add_argument("--timeout", type=float, default=40, help="Seconds to wait for first online heartbeat")
+    parser.add_argument(
+        "--timeout", type=float, default=40, help="Seconds to wait for first online heartbeat"
+    )
     parser.add_argument("--log", type=Path, default=Path(".artifacts/indicators.log"))
     args = parser.parse_args()
     if args.duration < 20 or args.timeout <= 0:

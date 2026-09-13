@@ -196,7 +196,7 @@ class ConfigTests(unittest.TestCase):
         self.assertIs(self.app.TRANSISTOR_CONTROL_PIN, self.app.board.D10)
 
     def test_loads_both_legacy_nvm_formats(self):
-        payload = b'{"ssid":"test","password":"testpass"}'
+        payload = b'{"ssid":"test","password":"testpass"}'  # pragma: allowlist secret
         for magic in (b"GATE1", b"GATE2"):
             self.nvm[:6 + len(payload)] = magic + bytes([len(payload)]) + payload
             self.assertEqual(self.app.load_config(), json.loads(payload))
