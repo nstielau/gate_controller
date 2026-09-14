@@ -3,10 +3,14 @@ const {execFileSync} = require("node:child_process");
 const {readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync} = require("node:fs");
 const {resolve, join} = require("node:path");
 const {tmpdir} = require("node:os");
+const {createRequire} = require("node:module");
 const {randomBytes} = require("node:crypto");
 const {Firestore} = require("../firebase/functions/node_modules/@google-cloud/firestore");
 const {OAuth2Client} = require("../firebase/functions/node_modules/google-auth-library");
 const {Storage} = require("../firebase/functions/node_modules/@google-cloud/storage");
+// Storage's nested auth library expects plain headers; the root v10 library
+// returns Headers. Construct its client with the same dependency it consumes.
+const {OAuth2Client: StorageOAuth2Client} = createRequire(require.resolve("../firebase/functions/node_modules/@google-cloud/storage"))("google-auth-library");
 const {hash, OWNER, validateManifest} = require("../firebase/functions/administration.cjs");
 const ROOT = resolve(__dirname, ".."), PROJECT = "drawbridge-45487", BUCKET = PROJECT + "-firmware";
 const [action, argument] = process.argv.slice(2);
@@ -66,7 +70,10 @@ async function main() {
         if (m.git_commit !== commit || m.app_version !== argument || m.size !== bytes.length || m.sha256 !== hash(bytes)) throw new Error("Release integrity mismatch");
         const source = JSON.parse(cli("gh", ["api", "repos/nstielau/gate_controller/contents/circuitpython/drawbridge.py?ref=" + commit]));
         if (source.encoding !== "base64" || !bytes.equals(Buffer.from(source.content, "base64"))) throw new Error("Release differs from tagged source");
-        const storage = new Storage({projectId: PROJECT, authClient}), file = storage.bucket(BUCKET).file(m.artifact_object);
+        const storageAuth = new StorageOAuth2Client();
+        storageAuth.setCredentials({access_token: accessToken});
+        storageAuth.quotaProjectId = PROJECT;
+        const storage = new Storage({projectId: PROJECT, authClient: storageAuth}), file = storage.bucket(BUCKET).file(m.artifact_object);
         try { await file.save(bytes, {resumable: false, validation: "crc32c", preconditionOpts: {ifGenerationMatch: 0}, metadata: {contentType: "text/plain", cacheControl: "private,max-age=31536000,immutable"}}); }
         catch (error) {
           if (error.code !== 412) throw error;
