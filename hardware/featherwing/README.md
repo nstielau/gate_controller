@@ -50,6 +50,21 @@ PCBWay uploads from `artifacts/featherwing/`:
 | Assembly other files | `drawbridge-featherwing-assembly-other.zip` |
 | Complete package for review | `drawbridge-featherwing-pcbway.zip` |
 
+For Seeed Studio Fusion, upload `seeed-assembly-bom.csv`. It uses Seeed's
+four-column `Designator`, `Manufacturer Part Number or Seeed SKU`, `Qty`, and
+`Link` format and consolidates identical MPNs. All parts except J3 are selected from Seeed's Shenzhen Open Parts Library
+(OPL); their links search the live OPL listing. J3 is Phoenix Contact 1725656
+and uses its manufacturer link for external sourcing by Seeed (not verified
+OPL stock). The BOM includes the two underside Feather headers, five resistors,
+Q1, three LEDs, and J3. The Feather host is excluded. Check live availability when requesting a quote because OPL stock
+changes independently of this repository.
+
+The selected XKB headers have 2.54 mm pitch, 2.5 mm insulators, 3.0 mm solder
+tails, and 6.0 mm mating pins. Seeed must install their bodies on the bottom of
+the wing, with the 6.0 mm pins pointing down into the Feather's sockets. The
+LEDs are a matching Everlight 3 mm family; observe the KiCad cathode/pad-1
+orientation during assembly.
+
 All three ZIPs are generated together and every member is byte-checked against
 the corresponding loose file. Gerbers and drills are also available in `gerbers/`
 and `drills/`. Each run refreshes `board.png`, `schematic.pdf`, `schematic.svg`,
@@ -66,8 +81,8 @@ is generated from that same SVG as a reference; no separate logo placement by
 PCBWay is needed. For a bare-board order, only the Gerbers and drill files are
 needed. For assembly, select through-hole assembly and ask PCBWay to
 confirm the listed manufacturer part numbers and header availability. J3 is a
-pair of hand-solder pads at the right-hand edge so the output wires leave away
-from the USB connector.
+top-side screw terminal at the right-hand edge, with wire entry facing outward
+away from the USB connector.
 
 Recommended starting options are two layers, FR-4, 1.6 mm thickness, 1 oz
 copper, green solder mask, white silkscreen, and lead-free HASL. These are
@@ -83,10 +98,29 @@ the Gerbers in PCBWay's viewer, especially the Feather header orientation,
 mounting holes, J3 polarity, and the antenna keepout at the FeatherS3[D] end.
 
 The gate-controller interface remains installation-specific. The transistor
-stage is retained because it is the known-working circuit; J3 is two large
-plated-through solder pads, with pad 1 = OUT_OC and pad 2 = GND. No connector
-component is populated; hand-solder the field wires and add strain relief.
-J3 is omitted from both the assembly BOM and centroid position file.
+stage is retained because it is the known-working circuit. J3 is populated with
+[Phoenix Contact MPT 0,5/2-2,54, 1725656](https://www.phoenixcontact.com/us/products/1725656).
+Viewed from above with USB left, the upper screw is GND (pin 2) and the lower
+screw is OUT_OC (pin 1). Follow these labels when reconnecting existing wires.
+The terminal has a 5.54 x 6.2 mm body, 8.5 mm installed height, and 2.54 mm
+contact pitch. Use 20–26 AWG wire, strip 4.5 mm, and tighten to 0.12–0.15 N m
+while supporting the terminal body. Provide cable strain relief.
+
+The local `Drawbridge:ExitTerminal` footprint retains KiCad's Phoenix footprint
+contacts and both 1.1 mm non-plated locating holes from the manufacturer's
+drilling drawing, 2.54 mm toward the wire-entry side of the contact pins. It
+uses a 0.25 mm body courtyard and omits silkscreen at the wire-entry edge. Do not omit
+these holes or substitute a generic 2.54 mm header footprint. J3 is included in
+all assembly BOMs and in the top-side position file. The headers remain on the
+underside. The board outline is unchanged at 50.8 x 22.86 mm.
+
+Routing uses horizontal, vertical, and 45-degree segments, with chamfers at
+right-angle turns. Connected branches may still meet at right angles; these
+are electrical junctions, not sharp bends in a continuous route. Copper/holes,
+component courtyards, and silkscreen are checked on every fabrication build.
+The terminal and cable are near the Feather's antenna end: RF performance and
+assembled stack/enclosure clearance need checking with the actual host. DRC
+does not establish either of those physical properties.
 
 The Feather-compatible J1 (16-pin) and J2 (12-pin) stacking headers are
 bottom-side assembly parts. Their XY pin coordinates are intentionally not

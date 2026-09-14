@@ -1,12 +1,13 @@
 Reference,Value,Description,Manufacturer,Manufacturer Part Number,Footprint,Quantity,Populate
-J1,Feather 16,Feather-compatible 1x16 header,Harwin,M20-9991646,Drawbridge:FeatherHeader16,1,Yes
-J2,Feather 12,Feather-compatible 1x12 header,Harwin,M20-9991246,Drawbridge:FeatherHeader12,1,Yes
-R1,1k,"1 kOhm 1% axial resistor, 0.25 W",Yageo,CFR-25JB-52-1K,Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal,1,Yes
-R2,100k,"100 kOhm 1% axial resistor, 0.25 W",Yageo,CFR-25JB-52-100K,Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal,1,Yes
+J1,Feather 16,"Feather-compatible 1x16 male header, 2.54 mm, 3/6 mm pins",XKB,X6511WV-16H-C30D60,Drawbridge:FeatherHeader16,1,Yes
+J2,Feather 12,"Feather-compatible 1x12 male header, 2.54 mm, 3/6 mm pins",XKB,X6511WV-12H-C30D60,Drawbridge:FeatherHeader12,1,Yes
+R1,1k,"1 kOhm 5% axial resistor, 0.25 W",Yageo,CFR-25JB-52-1K,Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal,1,Yes
+R2,100k,"100 kOhm 5% axial resistor, 0.5 W",Yageo,MFR50SJT-52-100K,Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal,1,Yes
 Q1,2N3904,"NPN transistor, TO-92, EBC",onsemi,2N3904BU,Package_TO_SOT_THT:TO-92_Inline,1,Yes
-R3,1k,"1 kOhm 1% axial resistor, 0.25 W",Yageo,CFR-25JB-52-1K,Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal,1,Yes
-D1,WIFI,"3 mm cool-white LED, THT",Kingbright,WP7104QWC/D,LED_THT:LED_D3.0mm,1,Yes
-R4,1k,"1 kOhm 1% axial resistor, 0.25 W",Yageo,CFR-25JB-52-1K,Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal,1,Yes
-D2,MQTT,"3 mm blue LED, THT",Kingbright,L-7104QBC-D,LED_THT:LED_D3.0mm,1,Yes
-R5,1k,"1 kOhm 1% axial resistor, 0.25 W",Yageo,CFR-25JB-52-1K,Drawbridge:GateHoldResistor,1,Yes
-D3,HOLD,"3 mm green LED, THT",Lite-On,L-7104LGD,LED_THT:LED_D3.0mm,1,Yes
+J3,OUT / GND,"2-position screw terminal, 2.54 mm, side wire entry",Phoenix Contact,1725656,Drawbridge:ExitTerminal,1,Yes
+R3,1k,"1 kOhm 5% axial resistor, 0.25 W",Yageo,CFR-25JB-52-1K,Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal,1,Yes
+D1,WIFI,"3 mm cool-white LED, THT",Everlight,204-15UTC/S400-X9,LED_THT:LED_D3.0mm,1,Yes
+R4,1k,"1 kOhm 5% axial resistor, 0.25 W",Yageo,CFR-25JB-52-1K,Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal,1,Yes
+D2,MQTT,"3 mm blue LED, THT",Everlight,204-10SUBC/S400-A4,LED_THT:LED_D3.0mm,1,Yes
+R5,1k,"1 kOhm 5% axial resistor, 0.25 W",Yageo,CFR-25JB-52-1K,Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal,1,Yes
+D3,HOLD,"3 mm green LED, THT",Everlight,204-10SUGD/S400-A5,LED_THT:LED_D3.0mm,1,Yes

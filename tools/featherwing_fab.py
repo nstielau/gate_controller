@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timezone
+from urllib.parse import quote
 import zipfile
 from xml.sax.saxutils import escape
 
@@ -23,6 +24,22 @@ KICAD_APP = Path("/Applications/KiCad/KiCad.app/Contents")
 KICAD = KICAD_APP / "MacOS/kicad-cli"
 KICAD_PYTHON = KICAD_APP / "Frameworks/Python.framework/Versions/3.9/bin/python3.9"
 OUTPUT = ROOT / "artifacts/featherwing"
+SEEED_OPL_URL = "https://www.seeedstudio.com/opl.html?keywords="
+SEEED_OPL_MPNS = frozenset(
+    {
+        "X6511WV-16H-C30D60",
+        "X6511WV-12H-C30D60",
+        "CFR-25JB-52-1K",
+        "MFR50SJT-52-100K",
+        "2N3904BU",
+        "204-15UTC/S400-X9",
+        "204-10SUBC/S400-A4",
+        "204-10SUGD/S400-A5",
+    }
+)
+
+
+EXTERNAL_PARTS = {"1725656": "https://www.phoenixcontact.com/us/products/1725656"}
 
 
 def run(*args):
@@ -97,11 +114,7 @@ def archive_maps(release):
     return {
         f"{NAME}-pcbway.zip": {f"{NAME}/{name}": p for name, p in loose.items()},
         f"{NAME}-gerbers.zip": {
-            **{
-                p.name: p
-                for name, p in loose.items()
-                if name.startswith(("gerbers/", "drills/"))
-            },
+            **{p.name: p for name, p in loose.items() if name.startswith(("gerbers/", "drills/"))},
             marker.name: marker,
         },
         f"{NAME}-assembly-other.zip": {
@@ -115,6 +128,7 @@ def archive_maps(release):
                 "drawbridge-silkscreen.svg",
                 "drawbridge-silkscreen.png",
                 "assembly-bom.xlsx",
+                "seeed-assembly-bom.csv",
                 marker.name,
             )
         },
@@ -178,7 +192,7 @@ def write_bom_xlsx(source, destination):
     sheet = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-        f'<sheetData>{"".join(cells)}</sheetData></worksheet>'
+        f"<sheetData>{''.join(cells)}</sheetData></worksheet>"
     )
     workbook = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -205,7 +219,7 @@ def write_bom_xlsx(source, destination):
         '<Default Extension="xml" ContentType="application/xml"/>'
         '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
         '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-        '</Types>'
+        "</Types>"
     )
     with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("[Content_Types].xml", content_types)
@@ -213,6 +227,37 @@ def write_bom_xlsx(source, destination):
         archive.writestr("xl/workbook.xml", workbook)
         archive.writestr("xl/_rels/workbook.xml.rels", rels)
         archive.writestr("xl/worksheets/sheet1.xml", sheet)
+
+
+def write_seeed_bom(source, destination):
+    """Write populated parts in Seeed Fusion's four-column BOM format."""
+    with source.open(newline="") as stream:
+        source_rows = list(csv.DictReader(stream))
+    grouped = {}
+    for row in source_rows:
+        if row["Populate"].strip().lower() != "yes":
+            continue
+        reference = row["Reference"].strip()
+        mpn = row["Manufacturer Part Number"].strip()
+        quantity = int(row["Quantity"])
+        if not reference or not mpn or quantity < 1:
+            raise RuntimeError(f"Invalid assembled BOM row: {row}")
+        if mpn not in SEEED_OPL_MPNS and mpn not in EXTERNAL_PARTS:
+            raise RuntimeError(f"MPN has not been reviewed in Seeed OPL: {reference}: {mpn}")
+        link = EXTERNAL_PARTS.get(mpn) or SEEED_OPL_URL + quote(mpn, safe="")
+        item = grouped.setdefault(mpn, {"designators": [], "quantity": 0, "link": link})
+        if item["link"] != link:
+            raise RuntimeError(f"Conflicting links for MPN {mpn}")
+        item["designators"].append(reference)
+        item["quantity"] += quantity
+
+    with destination.open("w", newline="") as stream:
+        writer = csv.writer(stream, lineterminator="\n")
+        writer.writerow(["Designator", "Manufacturer Part Number or Seeed SKU", "Qty", "Link"])
+        for mpn, item in grouped.items():
+            if len(item["designators"]) > item["quantity"]:
+                raise RuntimeError(f"More designators than parts for MPN {mpn}")
+            writer.writerow([",".join(item["designators"]), mpn, item["quantity"], item["link"]])
 
 
 def replace_release(staging, output):
@@ -277,14 +322,6 @@ def export_release(release, revision):
         "both",
         BOARD,
     )
-    # J3 is a board-only pair of hand-solder pads, not an assembled part.
-    # Filter it after KiCad has generated the position file; exporting first
-    # keeps this compatible with KiCad's normal CSV writer.
-    position_file = release / "assembly-position.csv"
-    position_lines = position_file.read_text().splitlines()
-    position_file.write_text(
-        "\n".join(line for line in position_lines if not line.startswith('"J3",')) + "\n"
-    )
     run("sch", "export", "pdf", SCHEMATIC, "-o", release / "schematic.pdf")
     run("sch", "export", "svg", SCHEMATIC, "-o", release / "schematic-svg")
     svg_files = list((release / "schematic-svg").glob("*.svg"))
@@ -321,6 +358,7 @@ def export_release(release, revision):
     )
     shutil.copyfile(DESIGN / "bom.csv", release / "assembly-bom.csv")
     write_bom_xlsx(DESIGN / "bom.csv", release / "assembly-bom.xlsx")
+    write_seeed_bom(DESIGN / "bom.csv", release / "seeed-assembly-bom.csv")
     shutil.copyfile(DESIGN / "README.md", release / "assembly-notes.txt")
     shutil.copyfile(
         DESIGN / "assets/drawbridge-silkscreen.svg", release / "drawbridge-silkscreen.svg"
@@ -353,6 +391,7 @@ def export_release(release, revision):
         "drawbridge-silkscreen.png",
         "assembly-bom.csv",
         "assembly-bom.xlsx",
+        "seeed-assembly-bom.csv",
         "assembly-position.csv",
         marker_name,
     ]

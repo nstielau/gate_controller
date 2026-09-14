@@ -1,7 +1,10 @@
 """Offline regressions for fabrication release freshness and recovery."""
 
+import csv
+import ast
 import hashlib
 import json
+import math
 from pathlib import Path
 import tempfile
 import unittest
@@ -12,6 +15,36 @@ from tools import featherwing_fab as fab
 
 
 class FabricationReleaseTests(unittest.TestCase):
+    def test_route_corners_are_chamfered_and_endpoints_preserved(self):
+        source = ast.parse((fab.DESIGN / "generate.py").read_text())
+        function = next(
+            n for n in source.body if isinstance(n, ast.FunctionDef) and n.name == "route_45"
+        )
+        namespace = {"math": math}
+        exec(compile(ast.Module(body=[function], type_ignores=[]), "route_45", "exec"), namespace)
+        route = namespace["route_45"]
+        for points in [[(0, 0), (4, 0), (4, 5)], [(0, 0), (2, 2), (4, 0)], [(0, 0), (3, 6)]]:
+            output = route(points)
+            self.assertEqual(output[0], points[0])
+            self.assertEqual(output[-1], points[-1])
+            for a, b, c in zip(output, output[1:], output[2:]):
+                u, v = (b[0] - a[0], b[1] - a[1]), (c[0] - b[0], c[1] - b[1])
+                cosine = sum(x * y for x, y in zip(u, v)) / (math.hypot(*u) * math.hypot(*v))
+                self.assertGreaterEqual(cosine, math.sqrt(0.5) - 1e-6)
+            for a, b in zip(output, output[1:]):
+                dx, dy = abs(a[0] - b[0]), abs(a[1] - b[1])
+                self.assertTrue(min(dx, dy) < 1e-6 or abs(dx - dy) < 1e-6)
+
+    def test_exit_terminal_is_populated_and_seeed_uses_manufacturer_sourcing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "seeed.csv"
+            fab.write_seeed_bom(fab.DESIGN / "bom.csv", output)
+            with output.open() as source:
+                row = next(r for r in csv.DictReader(source) if r["Designator"] == "J3")
+            self.assertEqual(row["Manufacturer Part Number or Seeed SKU"], "1725656")
+            self.assertEqual(row["Qty"], "1")
+            self.assertEqual(row["Link"], fab.EXTERNAL_PARTS["1725656"])
+
     @staticmethod
     def revision_info(revision, generation=1):
         return {
@@ -35,6 +68,7 @@ class FabricationReleaseTests(unittest.TestCase):
             "drawbridge-silkscreen.png",
             "assembly-bom.csv",
             "assembly-bom.xlsx",
+            "seeed-assembly-bom.csv",
             "assembly-position.csv",
             "schematic.png",
             "drc.rpt",
@@ -163,6 +197,56 @@ class FabricationReleaseTests(unittest.TestCase):
                 self.assertIn(net_name, contents, f"{net_name} missing from {filename}")
             for net_name in obsolete:
                 self.assertNotIn(net_name, contents, f"{net_name} remains in {filename}")
+
+    def test_seeed_bom_groups_assembled_parts_and_excludes_unpopulated_parts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "bom.csv"
+            destination = root / "seeed.csv"
+            source.write_text(
+                "Reference,Manufacturer,Manufacturer Part Number,Quantity,Populate\n"
+                "R1,Yageo,CFR-25JB-52-1K,1,Yes\n"
+                "R2,Yageo,CFR-25JB-52-1K,1,Yes\n"
+                "Q1,onsemi,2N3904BU,1,Yes\n"
+                "J3,Harwin,DO-NOT-ASSEMBLE,1,No\n"
+            )
+            fab.write_seeed_bom(source, destination)
+            with destination.open(newline="") as stream:
+                rows = list(csv.reader(stream))
+            self.assertEqual(
+                rows,
+                [
+                    [
+                        "Designator",
+                        "Manufacturer Part Number or Seeed SKU",
+                        "Qty",
+                        "Link",
+                    ],
+                    [
+                        "R1,R2",
+                        "CFR-25JB-52-1K",
+                        "2",
+                        "https://www.seeedstudio.com/opl.html?keywords=CFR-25JB-52-1K",
+                    ],
+                    [
+                        "Q1",
+                        "2N3904BU",
+                        "1",
+                        "https://www.seeedstudio.com/opl.html?keywords=2N3904BU",
+                    ],
+                ],
+            )
+
+    def test_seeed_bom_rejects_an_unreviewed_part(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "bom.csv"
+            source.write_text(
+                "Reference,Manufacturer,Manufacturer Part Number,Quantity,Populate\n"
+                "R1,Unknown,NOT-IN-OPL,1,Yes\n"
+            )
+            with self.assertRaisesRegex(RuntimeError, "has not been reviewed"):
+                fab.write_seeed_bom(source, root / "seeed.csv")
 
 
 if __name__ == "__main__":
