@@ -56,6 +56,15 @@
     "cleanUrls": true,
     "predeploy": [
       "npm run build"
+    ],
+    "rewrites": [
+      {
+        "source": "/device-api/v1/**",
+        "function": {
+          "functionId": "firmwareDevice",
+          "region": "us-east1"
+        }
+      }
     ]
   },
   "firestore": {

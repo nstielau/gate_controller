@@ -29,6 +29,8 @@ def deploy(destination):
     files.extend([
         (Path("certs/emqxsl-ca.crt"), ca_file.read_bytes()),
         (Path("settings.toml"), settings.encode()),
+        (Path("drawbridge.py"), (app / "drawbridge.py").read_bytes()),
+        (Path("boot.py"), (app / "boot.py").read_bytes()),
         (Path("code.py"), (app / "code.py").read_bytes()),
     ])
     changed = 0

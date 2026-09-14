@@ -11,7 +11,7 @@ indicators. Targets CircuitPython 10.x; tested on 10.3.0.
 | D2 / GPIO3 external LED | Hold: OFF normally; four full blinks per second while D10 is HIGH. |
 | D10 / GPIO9 transistor control | LOW at boot; HIGH only for the requested hold duration. |
 
-D9 is unused. A hold command raises D10 steadily for its duration.
+D9 is reserved for optional OTA maintenance recovery. A hold command raises D10 steadily for its duration.
 The D2 LED reports the commanded transistor state, not sensed gate position.
 The temporary startup diagnostic flashes D0/D1/D2 together three times,
 then releases the pins before normal operation. Its function and call are
@@ -135,3 +135,14 @@ Use one serial reader at a time. With multiple boards, supply
 The collector-powered LED in the diagram is a disconnected bench load.
 The separate signal LEDs stay on the XIAO side. The prospective LiftMaster “eyes”
 connection has not been established as a compatible gate-control interface.
+
+## Opt-in OTA application updates
+
+`drawbridge.py` contains the versioned application policy; `code.py` retains
+networking and physical output leases. `boot.py`, the loader, libraries, and
+the root recovery app are deployed over USB. OTA writes verified application
+slots under `/ota/` and uses a trial boot before confirmation. Updates are
+initially disabled and have not yet passed physical bench verification.
+See [OTA operations](../docs/ota-operations.md) before enabling a device.
+D9/GPIO8 is reserved as the active-low maintenance input during reset when
+OTA is enabled on the XIAO. All other current pin roles are preserved.

@@ -104,3 +104,27 @@ web-grant:
 web-revoke:
 	@test -n "$(EMAIL)" || (echo 'Usage: make web-revoke EMAIL=user@example.com [DEVICE_ID=b3640c]'; exit 1)
 	node_modules/.bin/node firebase/functions/admin.cjs revoke "$(EMAIL)" "$(or $(DEVICE_ID),b3640c)"
+
+.PHONY: admin-seed ota-bucket-setup ota-enroll ota-provision firmware-build firmware-release firmware-import
+admin-seed:
+	node_modules/.bin/node tools/firmware_admin.cjs seed-admin
+
+ota-bucket-setup:
+	node_modules/.bin/node tools/firmware_admin.cjs bucket-setup
+
+ota-enroll:
+	@test -n "$(DEVICE_ID)" || (echo 'Set DEVICE_ID'; exit 1)
+	node_modules/.bin/node tools/firmware_admin.cjs enroll "$(DEVICE_ID)"
+
+ota-provision:
+	@test -n "$(DEVICE_ID)" || (echo 'Set DEVICE_ID'; exit 1)
+	$(PYTHON) tools/ota_provision.py "artifacts/ota/$(DEVICE_ID).env" --board "$(CIRCUITPY)" $(OTA_ARGS)
+
+firmware-build:
+	$(PYTHON) tools/firmware_release.py "$(VERSION)"
+
+firmware-release:
+	$(PYTHON) tools/firmware_release.py "$(VERSION)" --publish
+
+firmware-import:
+	node_modules/.bin/node tools/firmware_admin.cjs import-release "$(VERSION)"

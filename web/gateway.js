@@ -21,6 +21,9 @@ export async function createGateway() {
   const hold = httpsCallable(functions, "holdGate", {timeout: 30000});
   const rename = httpsCallable(functions, "renameGate", {timeout: 30000});
   return {
+    adminSession: async () => (await httpsCallable(functions, "adminSession")({})).data,
+    adminOverview: async () => (await httpsCallable(functions, "adminOverview")({})).data,
+    adminChange: async data => (await httpsCallable(functions, "adminChange")(data)).data,
     onUser: callback => onAuthStateChanged(auth, callback),
     signIn: () => signInWithRedirect(auth, new GoogleAuthProvider()),
     signOut: () => signOut(auth),

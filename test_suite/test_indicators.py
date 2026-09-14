@@ -128,10 +128,10 @@ class OutputTests(unittest.TestCase):
         self.assertEqual(
             [c.args[0] for c in self.app.digitalio.DigitalInOut.call_args_list],
             [
+                self.app.board.D10,
                 self.app.board.D0,
                 self.app.board.D1,
                 self.app.board.D2,
-                self.app.board.D10,
                 self.app.board.D0,
                 self.app.board.D1,
                 self.app.board.D2,

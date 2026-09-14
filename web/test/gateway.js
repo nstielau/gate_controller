@@ -6,6 +6,20 @@ export async function createGateway() {
   let callback;
   const devices = [{id: "test-device", name: "Garden gate"}, {id: "second-device", name: "Driveway"}];
   return {
+    async adminSession() { return {isAdmin: scenario === "admin" || scenario === "admin-revoked"}; },
+    async adminOverview() {
+      if (scenario === "admin-revoked") throw new Error("revoked");
+      window.__admins ||= [{email: "nick.stielau@gmail.com", owner: true}];
+      return {admins: window.__admins, devices: [{id: "test-device", name: "Garden gate", enabled: true, otaEnrolled: true, target: window.__target || null, reported: null}], releases: [{version: "1.0.0"}]};
+    },
+    async adminChange(data) {
+      window.__adminChanges ||= []; window.__adminChanges.push(data);
+      if (data.action === "grantAdmin") window.__admins.push({email: data.email, owner: false});
+      if (data.action === "revokeAdmin") window.__admins = window.__admins.filter(a => a.email !== data.email);
+      if (data.action === "targetFirmware") window.__target = {version: data.version, sequence: 1, enabled: true};
+      if (data.action === "pauseFirmware") window.__target = {enabled: false, sequence: 2};
+      return {ok: true};
+    },
     onUser(fn) { callback = fn; fn(scenario === "signed-out" ? null : {email: "operator@example.test", photoURL: "https://example.test/profile.jpg"}); },
     async signIn() { callback({email: "operator@example.test", photoURL: "https://example.test/profile.jpg"}); },
     async signOut() { callback(null); },

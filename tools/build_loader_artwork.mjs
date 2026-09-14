@@ -52,5 +52,5 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" vi
     ${chain([79,48],[67,70])}
   </g>
 </svg>`;
-await writeFile("web/drawbridge-loader.svg", svg);
+await writeFile("web/drawbridge-loader.svg", svg.trimEnd() + "\n");
 console.log("Built loader SVG with original castle/bridge pixels and a masked background patch.");

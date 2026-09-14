@@ -24,6 +24,7 @@
         </button>
         <div id="account-dropdown" class="account-dropdown" hidden role="menu">
           <button id="refresh" class="menu-action" role="menuitem" type="button">Refresh access</button>
+          <button id="admin-open" class="menu-action" role="menuitem" type="button" hidden>Administration</button>
           <button id="rename" class="menu-action" role="menuitem" type="button">Edit nickname</button>
           <form id="nickname-form" hidden>
             <label for="nickname">Gate nickname</label>
@@ -71,6 +72,21 @@
     </div>
     <button data-duration="0" class="release">End hold</button>
     <p class="hint">Each new command replaces the previous hold duration.</p>
+  </section>
+  <section id="admin-view" hidden aria-labelledby="admin-heading">
+    <div class="account-actions"><button id="admin-back" class="quiet" type="button">Back to gates</button><button id="admin-refresh" class="quiet" type="button">Refresh</button></div>
+    <h2 id="admin-heading">Administration</h2>
+    <h3>Administrators</h3>
+    <ul id="admin-people"></ul>
+    <form id="admin-grant">
+      <label for="admin-email">Google account email</label>
+      <input id="admin-email" type="email" required maxlength="254" autocomplete="email">
+      <button type="submit">Add administrator</button>
+    </form>
+    <p class="hint">Administrators can manage administrators and firmware. Gate control access is assigned separately.</p>
+    <h3>Device firmware</h3>
+    <div id="admin-devices"></div>
+    <p id="admin-result" role="status"></p>
   </section>
   <p id="result" role="status" aria-live="polite"></p>
   <p id="offline" hidden>You're offline. Reconnect to send a command.</p>

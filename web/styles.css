@@ -62,3 +62,13 @@ button:disabled { opacity: .45; cursor: default; }
   h2 { margin-top: .7rem; }
   .signed-out-hero { min-height: calc(100dvh - 1.3rem); }
 }
+
+#admin-people { padding: 0; list-style: none; }
+#admin-people li { display: flex; gap: .5rem; align-items: center; justify-content: space-between; overflow-wrap: anywhere; margin: .5rem 0; }
+#admin-people li span { min-width: 0; }
+#admin-view h3 { font-size: 1rem; margin: 1.1rem 0 .5rem; }
+#admin-grant button { margin-top: .5rem; }
+#admin-devices article { border-top: 1px solid #dce2d5; margin-top: 1rem; padding-top: .5rem; }
+#admin-devices p { font-size: .8rem; margin: .4rem 0; }
+#admin-devices select { margin-bottom: .5rem; }
+#admin-devices .quiet { margin-left: .6rem; }

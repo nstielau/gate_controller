@@ -34,3 +34,15 @@ function callable(handler) {
 exports.listDevices = onCall(options, callable(controller.listDevices));
 exports.renameGate = onCall(options, callable(controller.renameGate));
 exports.holdGate = onCall({...options, secrets: [username, password, ca]}, callable(controller.holdGate));
+
+const {onRequest} = require("firebase-functions/v2/https");
+const {getStorage} = require("firebase-admin/storage");
+const {createAdministration, createDeviceService} = require("./administration.cjs");
+const administration = createAdministration(getFirestore());
+const deviceService = createDeviceService(getFirestore());
+exports.adminSession = onCall(options, callable(administration.session));
+exports.adminOverview = onCall(options, callable(administration.overview));
+exports.adminChange = onCall(options, callable(administration.change));
+const {createFirmwareHandler} = require("./firmware-http.cjs");
+exports.firmwareDevice = onRequest({...options, enforceAppCheck: undefined, cors: false},
+  createFirmwareHandler(deviceService, getStorage().bucket("drawbridge-45487-firmware")));

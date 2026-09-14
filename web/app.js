@@ -1,3 +1,4 @@
+import {createAdminView} from "./admin.js";
 import {createGateway} from "./gateway.js";
 const $ = selector => document.querySelector(selector);
 const state = $("#user-state"), controls = $("#controls"), result = $("#result");
@@ -5,6 +6,11 @@ const buttons = [...document.querySelectorAll("[data-duration]")];
 let gateway, user, busy = false, devices = [], generation = 0;
 let savingNickname = false;
 let countdownTimer;
+const adminView = createAdminView({gateway: () => gateway, onClose: () => { controls.hidden = !user || !devices.length; }});
+$("#admin-open").onclick = async () => {
+  closeAccountMenu(); controls.hidden = true; state.hidden = true;
+  try { await adminView.open(); } catch (error) { result.textContent = error.message; }
+};
 function showLoading(message) {
   $("#loading-message").textContent = message;
   $("#loading-state").hidden = false;
@@ -102,6 +108,8 @@ function render() {
 }
 async function loadDevices() {
   closeNickname();
+  adminView.close();
+  $("#admin-open").hidden = true;
   const current = ++generation;
   devices = [];
   controls.hidden = true;
@@ -112,6 +120,10 @@ async function loadDevices() {
     const response = await gateway.listDevices();
     if (current !== generation) return;
     devices = response.devices;
+    // A role lookup failure must not prevent ordinary gate control.
+    gateway.adminSession().then(session => {
+      if (current === generation) $("#admin-open").hidden = !session.isAdmin;
+    }).catch(() => {});
     const previousId = $("#device").value;
     $("#device").replaceChildren(...devices.map(device => new Option(device.name, device.id)));
     if (devices.some(device => device.id === previousId)) $("#device").value = previousId;
@@ -197,6 +209,8 @@ render();
 try {
   gateway = await createGateway();
   gateway.onUser(next => {
+    adminView.close();
+    $("#admin-open").hidden = true;
     user = next;
     document.querySelector("main").classList.toggle("authenticated", !!user);
     showProfile(user);

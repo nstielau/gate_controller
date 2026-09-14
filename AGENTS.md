@@ -20,6 +20,13 @@
   test_suite.test_featherwing_fab` for the offline freshness/recovery tests,
   then `make featherwing-fab` and inspect `board.png` and `silkscreen.svg`.
 
+- J3 is now a populated top-side Phoenix 1725656 screw terminal, rotated 90°:
+  GND/pin 2 is above OUT_OC/pin 1 with USB left, wires exit right. Preserve its
+  two locating holes, top-side BOM/position entry, and underside J1/J2 headers.
+  It is externally sourced in the Seeed BOM; do not claim it is verified OPL stock.
+- Preserve `route_45` chamfers and run full fabrication checks after routing or
+  placement changes. DRC does not validate the assembled host's RF performance.
+
 # Drawbridge Firebase app
 
 - Read `firebase/README.md` for the web app's architecture and operational
@@ -103,7 +110,7 @@
 
 - Current firmware initializes transistor control `board.D10` (**GPIO9**) LOW.
   A valid timed MQTT hold raises D10 steadily until monotonic expiry or exit.
-  D9 is unused. Indicator servicing must never toggle D10.
+  D9 is the optional OTA maintenance input. Indicator servicing must never toggle D10.
 - The onboard `board.LED` is **active low**: a 100 ms pulse every two seconds
   shows the loop is running, independent of connectivity and hold state.
 - External LEDs are active HIGH: D0/GPIO1 is Wi-Fi (500 ms transitions until
@@ -114,7 +121,7 @@
 - Keep the commented temporary three-flash D0/D1/D2 startup diagnostic until
   requested to remove it. It releases pins before runtime initialization.
   Runtime outputs return LOW and the active-low onboard LED turns OFF on exit.
-- `gate_indicators.py` owns the independent LED timers. Network operations
+- `drawbridge.py` owns the independent LED timers (`gate_indicators.py` is a compatibility import). Network operations
   can temporarily delay servicing, particularly initial Wi-Fi/TLS connection.
   No network failure should call `microcontroller.reset()`.
 - Missing settings start an open `Gate-Setup-<chip suffix>` AP and portal at
@@ -188,3 +195,33 @@
 - The diagrams predate the four-LED firmware assignment. D2/GPIO3 is now the
   requested hold LED; it is a strapping pin, so do not pull it HIGH or externally
   drive it during reset. Keep USB GPIO19/20 unused; preserve D6/D7 for serial.
+
+# OTA and application administrators
+
+- Read `docs/ota-operations.md` for actual behavior; `docs/ota-upgrades.md` is
+  the earlier proposal. OTA is disabled until USB enrollment and explicit opt-in.
+  The first implementation is XIAO ESP32S3/CP10 only; do not infer Feather support.
+- `drawbridge.py` owns application policy; `code.py` owns physical hold leases,
+  networking and loader. OTA must never replace root `drawbridge.py`, `boot.py`,
+  `code.py`, libraries, or certificates. `/ota/app0.py` and `app1.py` plus two
+  checksummed journals preserve trial/confirmed state. This is not a sandbox.
+- D9/GPIO8 becomes maintenance recovery in OTA mode: ground it at hard reset
+  for host write access. Never disable concurrent filesystem-write protection.
+- Preserve hold deferral, size/digest/API/board validation, trial confirmation,
+  failed-sequence suppression, and USB fallback. Run `make test`, then real bench
+  power-loss/TLS/recovery checks before enabling field OTA. USB baseline was
+  deployed to b3640c on CircuitPython 10.3.0 (board ID
+  `seeed_xiao_esp32_s3_sense`); application 1.0.0 reconnects to Wi-Fi/MQTT.
+  OTA is still disabled; real OTA transfers, recovery and power-loss tests
+  remain outstanding. Do not confuse baseline operation with OTA validation.
+- Admin roles use verified Google emails in server-owned `admins/` records.
+  Nick is seeded via `make admin-seed`; owner removal is blocked. Browser roles
+  require App Check and a fresh transactional check on every admin mutation.
+  Gate-control UID allowlists remain separate; admin access is not gate access.
+- Device OTA bearer tokens are random and per-device, hashed in Firestore,
+  stored locally only in ignored `artifacts/ota/`. Never print them or expose
+  them in admin responses, URLs, web assets, or logs. Device HTTP auth is
+  separate from browser auth. Keep deny-all Firestore rules for new collections.
+- Release tools require a clean tagged commit and verified GitHub release
+  bytes; mirrors are create-only in a private bucket. Target only approved
+  manifests. Reassigning an older app must use a newer deployment sequence.

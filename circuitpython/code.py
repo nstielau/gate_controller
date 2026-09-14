@@ -19,7 +19,7 @@ import board
 import digitalio
 import supervisor
 from gate_mqtt import GateMQTT, NETWORK_SECONDS
-from gate_indicators import Indicators
+from drawbridge import Indicators, create_app, APP_VERSION
 from gate_hold import HoldState
 
 
@@ -48,6 +48,154 @@ mqtt_led = None
 indicators = Indicators(time.monotonic())
 hold = HoldState()
 hold_samples_left = 4
+application = None
+ota_store = None
+ota_http = None
+ota_version = APP_VERSION
+ota_selected = None
+ota_trial_started = 0
+ota_healthy_since = None
+ota_next_check = 0
+ota_backoff = 60
+ota_state = "disabled"
+watchdog_timer = None
+
+
+class Platform:
+    def request_hold(self, seconds, command_id, now):
+        # Bootstrap validates and owns the physical output deadline independently.
+        hold.apply(
+            json.dumps(
+                {
+                    "version": 1,
+                    "type": "hold_gate",
+                    "duration_seconds": seconds,
+                    "command_id": command_id,
+                }
+            ),
+            now,
+        )
+
+
+def initialize_application(allow_ota=True):
+    global application, indicators, ota_store, ota_selected, ota_version
+    global ota_trial_started, ota_state, watchdog_timer, ota_next_check
+    factory = create_app
+    if (
+        allow_ota
+        and os.getenv("OTA_ENABLED") in (1, "1")
+        and board.board_id == "seeed_xiao_esp32_s3_sense"
+    ):
+        import storage
+
+        if not storage.getmount("/").readonly:
+            from gate_ota import UpdateStore
+            from watchdog import WatchDogMode
+
+            ota_store = UpdateStore()
+            path, ota_selected = ota_store.begin_boot()
+            watchdog_timer = microcontroller.watchdog
+            watchdog_timer.timeout = 60
+            watchdog_timer.mode = WatchDogMode.RESET
+            if path:
+                namespace = {"__name__": "drawbridge_candidate"}
+                with open(path) as source:
+                    exec(source.read(), namespace)
+                if (
+                    namespace.get("APP_API_VERSION") != 1
+                    or namespace.get("APP_VERSION") != ota_selected["app_version"]
+                ):
+                    raise ValueError("invalid_app_interface")
+                factory = namespace["create_app"]
+                ota_version = namespace["APP_VERSION"]
+            ota_state = ota_store.state["outcome"]
+            ota_trial_started = time.monotonic()
+            ota_next_check = ota_trial_started + 60 + int.from_bytes(os.urandom(1), "big")
+    application = factory(Platform(), time.monotonic())
+    indicators = application.indicators
+    log_event(
+        "application_ready", version=ota_version, ota_state=ota_state, board_id=str(board.board_id)
+    )
+
+
+def ota_service(runtime, client):
+    global ota_http, ota_state, ota_next_check, ota_backoff, ota_healthy_since
+    if ota_store is None:
+        return
+    now = time.monotonic()
+    online = client is not None and wifi.radio.connected
+    if watchdog_timer:
+        watchdog_timer.feed()
+    if ota_store.state["trial"]:
+        if online:
+            if ota_healthy_since is None:
+                ota_healthy_since = now
+            if now - ota_healthy_since >= 60:
+                ota_store.confirm()
+                ota_state = "current"
+                log_event("ota_confirmed", version=ota_version)
+        else:
+            ota_healthy_since = None
+        if ota_store.state["trial"] and now - ota_trial_started > 300:
+            ota_store.rollback()
+            supervisor.reload()
+        return
+    if not online or hold.active(now) or now < ota_next_check:
+        return
+    import sys
+    from gate_http import DeviceHTTP
+    from gate_ota import validate_manifest
+
+    def service():
+        client.poll()
+        service_outputs(runtime, online=bool(wifi.radio.connected))
+        if watchdog_timer:
+            watchdog_timer.feed()
+        if hold.active(time.monotonic()):
+            raise OSError("hold_active")
+
+    try:
+        if ota_http is None:
+            if os.getenv("OTA_DEVICE_ID") != device_suffix().lower():
+                raise ValueError("ota_identity_mismatch")
+            ota_http = DeviceHTTP(
+                adafruit_connection_manager.get_radio_socketpool(wifi.radio),
+                device_suffix().lower(),
+                os.getenv("OTA_TOKEN") or "",
+            )
+        response = ota_http.request(
+            "manifest", service, lambda r: None if r.status == 204 else r.json()
+        )
+        if response is not None:
+            manifest = validate_manifest(response, board.board_id, sys.implementation.version[0])
+            if manifest["sequence"] > ota_store.state["floor"]:
+                installed = ota_http.request(
+                    "artifact?sequence=" + str(manifest["sequence"]),
+                    service,
+                    lambda r: (
+                        ota_store.stage(manifest, r.chunks(), service) if r.status == 200 else False
+                    ),
+                    limit=manifest["size"],
+                )
+                if installed:
+                    log_event("ota_staged", version=manifest["app_version"])
+                    supervisor.reload()
+        ota_http.request(
+            "report",
+            service,
+            lambda r: None,
+            body={
+                "state": ota_state,
+                "version": ota_version,
+                "sequence": ota_selected["sequence"] if ota_selected else 0,
+            },
+        )
+        ota_backoff = 60
+        ota_next_check = time.monotonic() + 21600 + int.from_bytes(os.urandom(2), "big") % 1800
+    except (OSError, ValueError, RuntimeError):
+        log_event("ota_check_failed")  # URLs and credentials are deliberately omitted.
+        ota_next_check = time.monotonic() + ota_backoff
+        ota_backoff = min(ota_backoff * 2, 86400)
 
 
 # TEMPORARY STARTUP DIAGNOSTIC — remove this function and its call in main()
@@ -74,7 +222,8 @@ def startup_pin_diagnostic():
 def service_status_led(wifi_connected, mqtt_connected, gate_active, now):
     """Independent health, Wi-Fi, MQTT and hold LEDs; never touch D10 here."""
     global hold_samples_left
-    changed, elapsed = indicators.tick(now, wifi_connected, mqtt_connected, gate_active)
+    tick = application.tick if application is not None else indicators.tick
+    changed, elapsed = tick(now, wifi_connected, mqtt_connected, gate_active)
     led.value = not indicators.alive_on
     wifi_led.value = indicators.wifi_on
     mqtt_led.value = indicators.mqtt_on
@@ -399,6 +548,7 @@ def status_payload(runtime):
             "uptime_ms": int(time.monotonic() * 1000),
             "indicators": indicator_status(),
             "hold_remaining_seconds": hold.remaining(time.monotonic()),
+            "firmware": {"version": ota_version, "bootstrap": "1.0.0", "state": ota_state},
         }
     )
 
@@ -411,7 +561,9 @@ def on_mqtt_message(client, topic, message):
         log_event("command_rejected", reason="retained hold commands are unsafe")
         return
     try:
-        hold.apply(message, time.monotonic())
+        (application or create_app(Platform(), time.monotonic())).on_message(
+            message, False, time.monotonic()
+        )
     except ValueError:
         log_event("command_rejected", reason="invalid hold schema")
         return
@@ -514,6 +666,8 @@ def run_configured_controller(pool, config):
     last_status = 0
     while True:
         now = time.monotonic()
+        if watchdog_timer:
+            watchdog_timer.feed()
         service_outputs(runtime, online=client is not None and wifi.radio.connected)
         try:
             if client is None:
@@ -536,6 +690,7 @@ def run_configured_controller(pool, config):
                 last_status = time.monotonic()
                 log_event("heartbeat", **indicator_status())
                 hold_samples_left = 4
+            ota_service(runtime, client)
         except (ConnectionError, MQTT.MMQTTException, OSError) as error:
             # ValueError is a programming/configuration error, not a network failure.
             log_event("connection_error", error=str(error))
@@ -544,13 +699,12 @@ def run_configured_controller(pool, config):
                 client.close()
                 client = None
             next_attempt = time.monotonic() + 5
+            ota_service(runtime, None)
         time.sleep(0.001)
 
 
 def main():
     global gate_output, hold_led, wifi_led, mqtt_led
-    # TEMPORARY STARTUP DIAGNOSTIC — remove with startup_pin_diagnostic().
-    startup_pin_diagnostic()
     log_event("boot", reset_reason=str(microcontroller.cpu.reset_reason))
     outputs = []
     try:
@@ -563,21 +717,41 @@ def main():
             output = digitalio.DigitalInOut(pin)
             outputs.append(output)
             output.switch_to_output(value=False)
+            if pin is TRANSISTOR_CONTROL_PIN:
+                # TEMPORARY diagnostic; D10 is already LOW and never blinks.
+                startup_pin_diagnostic()
         gate_output, wifi_led, mqtt_led, hold_led = outputs
-        service_outputs(None, online=False)
         config = add_settings_credentials(load_config())
+        # Provisioning may run indefinitely; do not trial an app/start its
+        # watchdog until saved Wi-Fi/MQTT settings are available.
+        initialize_application(allow_ota=bool(config and mqtt_ready(config)))
+        service_outputs(None, online=False)
         if config and mqtt_ready(config):
             pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
             run_configured_controller(pool, config)
         else:
             log_event("provisioning")
             run_portal()
+    except Exception:
+        for output in outputs:
+            output.value = False
+        if ota_store is not None and ota_selected is not None:
+            if ota_store.state["trial"]:
+                ota_store.rollback()
+            else:
+                ota_store.save(dict(ota_store.state, active=None, outcome="rolled_back"))
+            log_event("ota_rolled_back")
+            supervisor.reload()
+        raise
     finally:
         for output in outputs:
             output.value = False
             output.deinit()
         led.value = True  # Active-low heartbeat stops when the program exits.
         led.deinit()
+        if watchdog_timer:
+            # Output cleanup must run even if a port cannot disable its watchdog.
+            watchdog_timer.mode = None
 
 
 if __name__ == "__main__":

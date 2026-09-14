@@ -21,7 +21,7 @@ try {
       console.log("PASS: " + origin + " reaches Google sign-in with the accepted callback");
     } finally { await context.close(); }
   }
-  for (const name of ["listDevices", "holdGate", "renameGate"]) {
+  for (const name of ["listDevices", "holdGate", "renameGate", "adminSession", "adminOverview", "adminChange"]) {
     const response = await fetch("https://us-east1-drawbridge-45487.cloudfunctions.net/" + name, {
       method: "POST", headers: {"Content-Type": "application/json", Origin: canonical},
       body: JSON.stringify({data: {}}), signal: AbortSignal.timeout(30000)
@@ -29,5 +29,13 @@ try {
     assert.equal(response.status, 401);
     assert.equal((await response.json()).error.status, "UNAUTHENTICATED");
     console.log("PASS: " + name + " rejects unauthenticated requests");
+  }
+  for (const route of ["manifest", "artifact?sequence=1", "report"]) {
+    const response = await fetch(canonical + "/device-api/v1/" + route, {
+      method: route === "report" ? "POST" : "GET", signal: AbortSignal.timeout(30000)
+    });
+    assert.equal(response.status, 401);
+    assert.match(response.headers.get("cache-control"), /no-store/);
+    console.log("PASS: firmware " + route + " rejects unauthenticated devices and disables caching");
   }
 } finally { await browser.close(); }

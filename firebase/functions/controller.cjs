@@ -82,4 +82,4 @@ function createController({store, publish, now = Date.now}) {
     }
   };
 }
-module.exports = {createController, canControl, fail, publicHold, publicHoldCount};
+module.exports = {createController, canControl, fail, publicHold, publicHoldCount, userId};

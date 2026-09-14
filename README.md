@@ -13,6 +13,10 @@ for the full local suite, and `make web-deploy` to test and deploy Firebase.
 
 Per-device MQTT credentials are a planned hardening step. See the
 [per-device credentials plan](docs/per-device-mqtt-credentials.md).
+Administrators can manage roles and per-device OTA targets through the profile
+menu's **Administration** view. Nick is the initial owner. See
+[OTA operations](docs/ota-operations.md) for opt-in enrollment, GitHub releases,
+USB recovery, and the required bench verification before field use.
 
 The XIAO ESP32S3 CircuitPython app provides Wi-Fi provisioning, MQTT, and
 connection/hold indicators. See [circuitpython/README.md](circuitpython/README.md)
@@ -55,27 +59,17 @@ does not establish the terminal's electrical interface or ratings.
 
 ## Hardware
 
-KiCad source files in `hardware/` are retained as a board-design reference.
+The current PCB is the [Drawbridge FeatherWing](hardware/featherwing/README.md),
+50.8 × 22.86 mm, two layers, 1.6 mm thick. It fits above a Feather using underside
+headers. J3 is a top-side 2.54 mm screw terminal for OUT_OC and GND, facing away
+from USB. The transistor stage uses a 2N3904, 1 kΩ base resistor, and 100 kΩ
+pulldown; each white/blue/green status LED has its own 1 kΩ resistor.
 
-### Circuit
+See [the generated BOM](hardware/featherwing/bom.csv) for exact parts and
+[circuitpython/README.md](circuitpython/README.md) for the XIAO firmware wiring.
+Older files at the root of `hardware/` are reference designs, not this board.
 
-- See [circuitpython/README.md](circuitpython/README.md) for the current XIAO
-  pin assignments and safe bench wiring.
-
-### BOM
-
-| Ref | Part | Value | Package |
-|-----|------|-------|---------|
-| Q1 | 2N3904 | NPN | TO-92 |
-| R1 | Resistor | 1kΩ | 0805 |
-| R2 | Resistor | 330Ω | 0805 |
-| R3 | Resistor | 330Ω | 0805 |
-| C1 | Capacitor | 100nF | 0805 |
-| LED1 | LED | Green | 0805 |
-| LED2 | WS2812B | RGB | 5050 |
-| J3 | Screw terminal | 2-pos | 5.08mm |
-
-### Fabrication
-
-Generate Gerber files from KiCad: File → Fabrication Outputs → Gerbers.
-Upload to JLCPCB, OSH Park, or PCBWay.
+Generate the complete current fabrication package with `make featherwing-fab`.
+Use the freshly generated files in `artifacts/featherwing/`; the
+[upload guide](hardware/featherwing/README.md#pcbway-upload) maps each file to its
+PCBWay or Seeed upload field.

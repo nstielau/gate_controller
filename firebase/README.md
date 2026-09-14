@@ -141,8 +141,14 @@ No debug-token bypass is included in the production app.
 
 ### Access and device administration
 
-Administrative helpers use your gcloud login as `nick.stielau@gmail.com` and
-project IAM. They do not expose administrative writes to browser clients.
+Gate-access helpers use your gcloud login as `nick.stielau@gmail.com` and
+project IAM. The profile dropdown also exposes **Administration** to server-verified
+administrators. That view manages admin email assignments and per-device firmware
+targets, separately from gate-control UID allowlists. `make admin-seed` initializes
+Nick's protected owner record. All browser admin calls require verified Google
+sign-in, App Check, and transactional role checks. See
+[OTA operations](../docs/ota-operations.md) for release publishing, enrollment,
+private artifact storage, and USB recovery.
 
 ```sh
 make web-grant EMAIL=person@example.com DEVICE_ID=b3640c

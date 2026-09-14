@@ -87,7 +87,7 @@ test("Firestore rules deny direct client reads and writes, even when signed in",
   const token = encode({alg: "none", typ: "JWT"}) + "." + encode({aud: "demo-drawbridge", iss: "https://securetoken.google.com/demo-drawbridge", sub: "operator", user_id: "operator", iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600, firebase: {sign_in_provider: "google.com"}}) + ".";
   for (const auth of [null, token]) {
     const headers = {"Content-Type": "application/json", ...(auth ? {Authorization: "Bearer " + auth} : {})};
-    for (const collection of ["devices", "commands", "users"]) {
+    for (const collection of ["devices", "commands", "users", "admins", "adminAudit", "firmwareReleases"]) {
       const url = "http://" + process.env.FIRESTORE_EMULATOR_HOST + "/v1/projects/demo-drawbridge/databases/(default)/documents/" + collection + "/" + f.id;
       assert.equal((await fetch(url, {headers})).status, 403);
       assert.equal((await fetch(url, {method: "PATCH", headers, body: JSON.stringify({fields: {enabled: {booleanValue: true}}})})).status, 403);

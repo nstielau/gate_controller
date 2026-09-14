@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from adafruit_minimqtt.adafruit_minimqtt import MQTT, ticks_ms
+sys.path.insert(0, str(ROOT / "circuitpython"))
 sys.path.insert(0, str(ROOT / "circuitpython/lib"))
 from gate_mqtt import GateMQTT, NETWORK_SECONDS
 from gate_state import BlinkState, parse_command
@@ -240,6 +241,8 @@ class DeploymentTests(unittest.TestCase):
             (root / "circuitpython/lib").mkdir(parents=True)
             (root / "board/lib").mkdir(parents=True)
             (root / "circuitpython/lib/fix.py").write_text("new library")
+            (root / "circuitpython/drawbridge.py").write_text("# app\n")
+            (root / "circuitpython/boot.py").write_text("# boot\n")
             (root / "circuitpython/code.py").write_text("new code")
             (root / "emqxsl-ca.crt").write_text("test cert")
             (root / ".env").write_text("MQTT_USERNAME=test\nMQTT_PASSWORD=secret\n")
