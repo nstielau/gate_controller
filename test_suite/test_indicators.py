@@ -33,14 +33,37 @@ class IndicatorTests(unittest.TestCase):
             (0, True),
             (0.099, True),
             (0.101, False),
+            (0.249, False),
+            (0.25, True),
+            (0.349, True),
+            (0.35, False),
             (1, False),
             (2, True),
             (2.101, False),
+            (2.25, True),
+            (2.351, False),
             (100, True),
         ]:
             state.tick(now, now >= 1, now >= 2, now >= 2)
             self.assertEqual(state.alive_on, expected)
         self.assertGreater(state.alive_edges, 0)
+
+    def test_double_heartbeat_repeats_with_four_edges_per_cycle(self):
+        state = Indicators(10)
+        for cycle in range(3):
+            for offset, expected in (
+                (0, True),
+                (0.125, False),
+                (0.25, True),
+                (0.375, False),
+                (1.75, False),
+            ):
+                state.tick(10 + cycle * 2 + offset, True, True, False)
+                self.assertEqual(state.alive_on, expected)
+                self.assertTrue(state.wifi_on)
+                self.assertTrue(state.mqtt_on)
+                self.assertFalse(state.hold_on)
+        self.assertEqual(state.alive_edges, 11)
 
     def test_hold_indicator_has_four_full_cycles_per_second(self):
         state = Indicators(0)

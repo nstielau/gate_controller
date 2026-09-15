@@ -111,8 +111,9 @@
 - Current firmware initializes transistor control `board.D10` (**GPIO9**) LOW.
   A valid timed MQTT hold raises D10 steadily until monotonic expiry or exit.
   D9 is the optional OTA maintenance input. Indicator servicing must never toggle D10.
-- The onboard `board.LED` is **active low**: a 100 ms pulse every two seconds
-  shows the loop is running, independent of connectivity and hold state.
+- The onboard `board.LED` is **active low**: two 100 ms pulses, starting 250 ms
+  apart, every two seconds show the loop is running, independent of connectivity
+  and hold state.
 - External LEDs are active HIGH: D0/GPIO1 is Wi-Fi (500 ms transitions until
   connected, then ON); D1/GPIO2 is MQTT (OFF without Wi-Fi, 500 ms transitions
   until subscribed, then ON); D2/GPIO3 is hold (OFF unless D10 is HIGH,

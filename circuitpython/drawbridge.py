@@ -6,7 +6,7 @@ This interface is a coding boundary, not a Python security sandbox.
 
 import json
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 APP_API_VERSION = 1
 
 
@@ -33,7 +33,9 @@ class Indicators:
             or mqtt_connected != self.mqtt_connected
             or holding != self.holding
         )
-        alive_on = (now - self.alive_epoch) % 2 < 0.1
+        # Two 100 ms flashes identify firmware 1.0.1 without blocking the loop.
+        alive_phase = (now - self.alive_epoch) % 2
+        alive_on = alive_phase < 0.1 or 0.25 <= alive_phase < 0.35
         if alive_on != self.alive_on:
             self.alive_edges += 1
         self.alive_on = alive_on

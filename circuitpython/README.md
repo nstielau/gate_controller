@@ -5,7 +5,7 @@ indicators. Targets CircuitPython 10.x; tested on 10.3.0.
 
 | Output | Behavior |
 | --- | --- |
-| Onboard yellow LED | Running heartbeat: 100 ms pulse every 2 seconds. |
+| Onboard yellow LED | Running heartbeat: two 100 ms flashes, starting 250 ms apart, every 2 seconds (1.0.1). |
 | D0 / GPIO1 external LED | Wi-Fi: 500 ms transitions while connecting; steady ON when connected. |
 | D1 / GPIO2 external LED | MQTT: OFF without Wi-Fi; 500 ms transitions while connecting; steady ON after subscription. |
 | D2 / GPIO3 external LED | Hold: OFF normally; four full blinks per second while D10 is HIGH. |
