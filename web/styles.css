@@ -17,7 +17,7 @@ main:has(#loading-state:not([hidden])) #result:empty { display: none; }
 .drawbridge-loader { position: relative; width: min(11rem, 50vw); aspect-ratio: 1; }
 .drawbridge-loader picture { display: block; }
 .drawbridge-loader img { display: block; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
-.brand { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+.brand { display: flex; align-items: center; gap: .5rem; min-width: 0; color: inherit; text-decoration: none; }
 .castle-icon { width: 2.5rem; height: 2.5rem; object-fit: contain; image-rendering: pixelated; }
 .wordmark { font-size: .8rem; letter-spacing: .16em; font-weight: 750; }
 .account-status { display: flex; align-items: center; gap: .5rem; min-height: 2.5rem; }
@@ -42,7 +42,7 @@ button { border: 0; border-radius: .75rem; padding: .75rem; font: inherit; color
 .buttons button.hold-active { background: linear-gradient(to right, #bfcb9c 0%, #bfcb9c calc(var(--hold-progress) * 1%), #edf2e6 calc(var(--hold-progress) * 1%), #edf2e6 100%); }
 strong { font-size: 1.7rem; font-weight: 600; }
 button:hover:not(:disabled) { filter: brightness(.94); }
-button:focus-visible, select:focus-visible { outline: 3px solid #bc6a26; outline-offset: 3px; }
+.brand:focus-visible, button:focus-visible, select:focus-visible { outline: 3px solid #bc6a26; outline-offset: 3px; }
 button:disabled { opacity: .45; cursor: default; }
 .quiet { background: transparent; color: #173f35; padding: .6rem .2rem; text-decoration: underline; font-size: .85rem; }
 .account-actions { display: flex; gap: 1.25rem; }
@@ -72,3 +72,13 @@ button:disabled { opacity: .45; cursor: default; }
 #admin-devices p { font-size: .8rem; margin: .4rem 0; }
 #admin-devices select { margin-bottom: .5rem; }
 #admin-devices .quiet { margin-left: .6rem; }
+
+.admin-heading { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.admin-heading h2 { margin: 0; }
+.icon-button { display: grid; place-items: center; flex: 0 0 2.75rem; width: 2.75rem; padding: .5rem; color: #173f35; background: transparent; }
+.admin-tabs { display: flex; gap: .25rem; margin: .75rem 0 1rem; padding: .25rem; border-radius: .75rem; background: #edf2e6; }
+.admin-tabs [role="tab"] { flex: 1; min-width: 0; padding: .65rem .4rem; border-radius: .55rem; color: #52665b; background: transparent; font-size: .85rem; }
+.admin-tabs [aria-selected="true"] { color: #173f35; background: white; font-weight: 650; box-shadow: 0 1px 3px #173f3520; }
+#admin-devices article:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
+#admin-devices article:first-child h3 { margin-top: 0; }
+#admin-result:empty { display: none; }

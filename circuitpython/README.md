@@ -142,7 +142,16 @@ connection has not been established as a compatible gate-control interface.
 networking and physical output leases. `boot.py`, the loader, libraries, and
 the root recovery app are deployed over USB. OTA writes verified application
 slots under `/ota/` and uses a trial boot before confirmation. Updates are
-initially disabled and have not yet passed physical bench verification.
+initially disabled. Two installations, hold deferral, and failure rollback have
+passed on the bench; [the validation record](../docs/ota-bench-validation.md)
+tracks remaining recovery and power-loss checks.
 See [OTA operations](../docs/ota-operations.md) before enabling a device.
 D9/GPIO8 is reserved as the active-low maintenance input during reset when
 OTA is enabled on the XIAO. All other current pin roles are preserved.
+
+The base and OTA app have independent versions. `lib/gate_base.py` defines the
+USB bundle's `BASE_VERSION`; the selected application's `APP_VERSION` can move
+forward independently. MQTT/Firebase report both, and Administration displays
+the pair. Older boards show “Base not reported” until deliberately updated by
+USB. Protected base commits require a version bump and change note; see the
+OTA editing boundary in [AGENTS.md](../AGENTS.md).

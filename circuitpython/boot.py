@@ -10,8 +10,14 @@ import board
 import digitalio
 import storage
 
-if os.getenv("OTA_ENABLED") == 1 and board.board_id == "seeed_xiao_esp32_s3_sense":
+mode = "usb"
+# CircuitPython 10.1+ returns strings from getenv, including TOML integers.
+if os.getenv("OTA_ENABLED") in (1, "1") and board.board_id == "seeed_xiao_esp32_s3_sense":
     with digitalio.DigitalInOut(board.D9) as recovery:
         recovery.switch_to_input(pull=digitalio.Pull.UP)
         if recovery.value:
             storage.remount("/", readonly=False)
+            mode = "ota"
+        else:
+            mode = "maintenance"
+print("GATE_BOOT mode=" + mode)

@@ -5,10 +5,11 @@ import ast
 import hashlib
 import json
 import math
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 import zipfile
 
 from tools import featherwing_fab as fab
@@ -46,13 +47,25 @@ class FabricationReleaseTests(unittest.TestCase):
             self.assertEqual(row["Link"], fab.EXTERNAL_PARTS["1725656"])
 
     @staticmethod
-    def revision_info(revision, generation=1):
-        return {
-            "revision": revision,
-            "git_head": "abcdef0123456789",
-            "dirty": generation > 0,
-            "dirty_generation": generation,
-        }
+    def revision_info(revision):
+        return {"revision": revision, "git_head": revision + "0" * 37, "dirty": False}
+
+    @staticmethod
+    def git(root, *args):
+        return subprocess.run(
+            ["git", *args], cwd=root, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    def init_repo(self, root):
+        self.git(root, "init")
+        self.git(root, "config", "user.email", "test@example.invalid")
+        self.git(root, "config", "user.name", "Fabrication Test")
+        self.git(root, "config", "core.hooksPath", "/dev/null")
+        (root / ".gitignore").write_text("artifacts/\n")
+        (root / "tracked.txt").write_text("committed input")
+        self.git(root, "add", ".")
+        self.git(root, "commit", "-m", "Test inputs")
+        return self.git(root, "rev-parse", "HEAD")
 
     def populate(self, release, revision):
         release.mkdir()
@@ -83,7 +96,7 @@ class FabricationReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             output = root / "featherwing"
-            for revision in ("first", "second"):
+            for revision in ("abc", "def"):
                 staging = root / "staging"
                 self.populate(staging, revision)
                 fab.package_release(staging, self.revision_info(revision))
@@ -99,6 +112,11 @@ class FabricationReleaseTests(unittest.TestCase):
                     self.assertEqual(
                         hashlib.sha256((output / name).read_bytes()).hexdigest(), digest
                     )
+                marker = output / f"REV_{revision}.txt"
+                self.assertEqual(
+                    marker.read_text(),
+                    f"{revision}\nGit commit: {self.revision_info(revision)['git_head']}\n",
+                )
                 self.assertEqual(len(list(output.glob("*.zip"))), 3)
                 for archive_name, members in fab.archive_maps(output).items():
                     with zipfile.ZipFile(output / archive_name) as archive:
@@ -106,7 +124,7 @@ class FabricationReleaseTests(unittest.TestCase):
                         for member, loose in members.items():
                             self.assertEqual(archive.read(member), loose.read_bytes())
                             self.assertTrue(archive.read(member).startswith(revision.encode()))
-                if revision == "first":
+                if revision == "abc":
                     (output / "old-attempt").mkdir()
                     (output / "old-attempt/stale.gto").write_text("old logo")
                     (output / "old-preview.png").write_text("old preview")
@@ -126,8 +144,9 @@ class FabricationReleaseTests(unittest.TestCase):
                 patch.object(
                     fab,
                     "determine_revision",
-                    return_value=self.revision_info("abc.1"),
+                    return_value=self.revision_info("abc"),
                 ),
+                patch.object(fab, "snapshot_sources"),
                 patch.object(fab, "regenerate_design"),
                 patch.object(fab, "export_release", side_effect=RuntimeError("DRC failed")),
                 self.assertRaisesRegex(RuntimeError, "DRC failed"),
@@ -137,45 +156,96 @@ class FabricationReleaseTests(unittest.TestCase):
             self.assertEqual(list(output.iterdir()), [previous])
             self.assertEqual(list(Path(temp).glob(".featherwing-build-*")), [])
 
-    def test_revision_is_clean_zero_or_next_dirty_generation(self):
+    def test_clean_revision_is_stable_and_ignores_build_outputs(self):
         with tempfile.TemporaryDirectory() as temp:
-            output = Path(temp)
-            head = "abcdef0123456789"
-            clean = {
-                "revision": "abc.0",
-                "git_head": head,
-                "dirty": False,
-                "dirty_generation": 0,
-            }
-            dirty = {
-                "revision": "abc.4",
-                "git_head": head,
-                "dirty": True,
-                "dirty_generation": 4,
-            }
+            root = Path(temp)
+            head = self.init_repo(root)
+            with patch.object(fab, "ROOT", root):
+                expected = {"revision": head[:3], "git_head": head, "dirty": False}
+                self.assertEqual(fab.determine_revision(), expected)
+                (root / "artifacts").mkdir()
+                (root / "artifacts/manifest.json").write_text('{"revision":"old.99"}')
+                self.assertEqual(fab.determine_revision(), expected)
 
-            def git_result(stdout):
-                result = Mock()
-                result.stdout = stdout
-                return result
+    def test_dirty_checkout_refuses_before_generation_and_preserves_artifacts(self):
+        for kind in ("unstaged", "staged", "untracked", "deleted"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                self.init_repo(root)
+                if kind == "deleted":
+                    (root / "tracked.txt").unlink()
+                elif kind == "untracked":
+                    (root / "new.txt").write_text("new input")
+                else:
+                    (root / "tracked.txt").write_text("edited input")
+                    if kind == "staged":
+                        self.git(root, "add", "tracked.txt")
+                output = root / "artifacts/featherwing"
+                output.mkdir(parents=True)
+                previous = output / "previous.zip"
+                previous.write_bytes(b"last successful release")
+                with (
+                    patch.object(fab, "ROOT", root),
+                    patch.object(fab, "OUTPUT", output),
+                    patch.object(fab, "KICAD", previous),
+                    patch.object(fab, "KICAD_PYTHON", previous),
+                    patch.object(fab, "snapshot_sources") as snapshot,
+                    self.assertRaisesRegex(RuntimeError, "clean Git checkout"),
+                ):
+                    fab.main()
+                snapshot.assert_not_called()
+                self.assertEqual(previous.read_bytes(), b"last successful release")
+                self.assertEqual(list(output.iterdir()), [previous])
 
-            with patch.object(
-                fab.subprocess,
-                "run",
-                side_effect=[git_result(head + "\n"), git_result("")],
-            ):
-                self.assertEqual(fab.determine_revision(output), clean)
-
-            (output / "manifest.json").write_text(json.dumps(dirty))
-            with patch.object(
-                fab.subprocess,
-                "run",
-                side_effect=[git_result(head + "\n"), git_result(" M file\n")],
-            ):
+    def test_snapshot_uses_committed_sources_without_mutating_checkout(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.init_repo(root)
+            design = root / "hardware/featherwing"
+            design.mkdir(parents=True)
+            (design / "generate.py").write_text("committed generator")
+            (root / "tools").mkdir()
+            (root / "tools/render_featherwing.mjs").write_text("committed renderer")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "Design inputs")
+            output = root / "artifacts"
+            output.mkdir()
+            with patch.object(fab, "ROOT", root):
+                before = fab.determine_revision()
+                staged = fab.snapshot_sources(output / "source", before["git_head"])
+                self.assertEqual((staged / "generate.py").read_text(), "committed generator")
                 self.assertEqual(
-                    fab.determine_revision(output),
-                    {**dirty, "revision": "abc.5", "dirty_generation": 5},
+                    (staged.parents[1] / "tools/render_featherwing.mjs").read_text(),
+                    "committed renderer",
                 )
+                (staged / "generate.py").write_text("generated changes")
+                self.assertEqual(fab.determine_revision(), before)
+                self.assertEqual((design / "generate.py").read_text(), "committed generator")
+
+    def test_head_change_during_build_preserves_previous_release(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "featherwing"
+            output.mkdir()
+            previous = output / "previous.zip"
+            previous.write_bytes(b"previous")
+            with (
+                patch.object(fab, "OUTPUT", output),
+                patch.object(fab, "KICAD", previous),
+                patch.object(fab, "KICAD_PYTHON", previous),
+                patch.object(
+                    fab,
+                    "determine_revision",
+                    side_effect=[self.revision_info("abc"), self.revision_info("def")],
+                ),
+                patch.object(fab, "snapshot_sources"),
+                patch.object(fab, "regenerate_design"),
+                patch.object(fab, "export_release"),
+                patch.object(fab, "package_release"),
+                self.assertRaisesRegex(RuntimeError, "HEAD changed"),
+            ):
+                fab.main()
+            self.assertEqual(list(output.iterdir()), [previous])
+            self.assertEqual(previous.read_bytes(), b"previous")
 
     def test_failed_directory_swap_restores_previous_release(self):
         with tempfile.TemporaryDirectory() as temp:

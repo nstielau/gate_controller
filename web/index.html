@@ -11,10 +11,10 @@
 </head>
 <body><main>
   <header>
-    <div class="brand">
+    <a class="brand" href="/" aria-label="Drawbridge home">
       <img class="castle-icon" src="/assets/drawbridge-castle.png" alt="">
       <span class="wordmark">DRAWBRIDGE</span>
-    </div>
+    </a>
     <div class="account-status">
       <span id="connection" class="badge">Connecting</span>
       <div class="account-menu">
@@ -74,18 +74,28 @@
     <p class="hint">Each new command replaces the previous hold duration.</p>
   </section>
   <section id="admin-view" hidden aria-labelledby="admin-heading">
-    <div class="account-actions"><button id="admin-back" class="quiet" type="button">Back to gates</button><button id="admin-refresh" class="quiet" type="button">Refresh</button></div>
-    <h2 id="admin-heading">Administration</h2>
-    <h3>Administrators</h3>
-    <ul id="admin-people"></ul>
-    <form id="admin-grant">
-      <label for="admin-email">Google account email</label>
-      <input id="admin-email" type="email" required maxlength="254" autocomplete="email">
-      <button type="submit">Add administrator</button>
-    </form>
-    <p class="hint">Administrators can manage administrators and firmware. Gate control access is assigned separately.</p>
-    <h3>Device firmware</h3>
-    <div id="admin-devices"></div>
+    <div class="admin-heading">
+      <h2 id="admin-heading">Administration</h2>
+      <button id="admin-refresh" class="icon-button" type="button" aria-label="Refresh administration" title="Refresh administration">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 6.1A8 8 0 0 1 19.7 10M4.3 14A8 8 0 0 0 17.9 17.9"/></svg>
+      </button>
+    </div>
+    <div class="admin-tabs" role="tablist" aria-label="Administration sections">
+      <button id="admin-tab-people" type="button" role="tab" aria-selected="true" aria-controls="admin-panel-people">Admins</button>
+      <button id="admin-tab-firmware" type="button" role="tab" aria-selected="false" aria-controls="admin-panel-firmware" tabindex="-1">Device Firmware</button>
+    </div>
+    <div id="admin-panel-people" role="tabpanel" aria-labelledby="admin-tab-people">
+      <ul id="admin-people"></ul>
+      <form id="admin-grant">
+        <label for="admin-email">Google account email</label>
+        <input id="admin-email" type="email" required maxlength="254" autocomplete="email">
+        <button type="submit">Add administrator</button>
+      </form>
+      <p class="hint">Administrators can manage administrators and firmware. Gate control access is assigned separately.</p>
+    </div>
+    <div id="admin-panel-firmware" role="tabpanel" aria-labelledby="admin-tab-firmware" hidden>
+      <div id="admin-devices"></div>
+    </div>
     <p id="admin-result" role="status"></p>
   </section>
   <p id="result" role="status" aria-live="polite"></p>

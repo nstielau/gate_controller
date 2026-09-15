@@ -34,6 +34,11 @@ Only assigned users can control a gate. The browser receives gate IDs and
 display names, never MQTT credentials or arbitrary broker/topic parameters.
 The first assigned account is `nick.stielau@gmail.com`, for gate `b3640c`.
 
+Administration has **Admins** and **Device Firmware** tabs and a refresh icon.
+Firmware cards show the last reported app/base pair, separately from the assigned
+target. Older boards show “Base not reported” until their USB bootstrap supports
+independent reporting. See [OTA operations](../docs/ota-operations.md).
+
 ## Architecture and behavior
 
 Firebase Hosting serves bundled HTML/JS/CSS. Google Authentication identifies

@@ -13,7 +13,14 @@ def provision(board, credential, enable=False):
     version = (board / "boot_out.txt").read_text()
     if "seeed_xiao_esp32_s3_sense" not in version:
         raise ValueError("OTA currently supports XIAO ESP32S3 only")
-    for name in ("boot.py", "code.py", "drawbridge.py", "lib/gate_ota.py", "lib/gate_http.py"):
+    for name in (
+        "boot.py",
+        "code.py",
+        "drawbridge.py",
+        "lib/gate_ota.py",
+        "lib/gate_http.py",
+        "certs/google-roots.pem",
+    ):
         if not (board / name).is_file():
             raise ValueError("Run make deploy before OTA provisioning")
     values = load_dotenv(credential)

@@ -7,7 +7,7 @@ import tempfile
 import runpy
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, mock_open
 import test_regressions as regressions
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -161,6 +161,9 @@ class BootstrapTests(unittest.TestCase):
             (1, "other", True, False),
             (1, "seeed_xiao_esp32_s3_sense", False, False),
             (1, "seeed_xiao_esp32_s3_sense", True, True),
+            ("1", "seeed_xiao_esp32_s3_sense", False, False),
+            ("1", "seeed_xiao_esp32_s3_sense", True, True),
+            ("0", "seeed_xiao_esp32_s3_sense", True, False),
         ]:
             storage, digitalio = MagicMock(), MagicMock()
             digitalio.DigitalInOut.return_value.__enter__.return_value.value = pin_high
@@ -220,6 +223,33 @@ class BootstrapTests(unittest.TestCase):
         app.ota_store.rollback.assert_called_once()
         app.supervisor.reload.assert_called_once()
 
+    def test_reports_running_base_and_app_independently(self):
+        app = self.app
+        app.ota_version = "1.2.3"
+        app.ota_selected = {"sequence": 9}
+        app.ota_state = "current"
+        app.ota_store = MagicMock(state={"trial": None})
+        app.ota_http = MagicMock()
+        app.ota_http.request.return_value = None
+        app.wifi.radio.connected = True
+        with patch.object(app, "indicator_status", return_value={}):
+            firmware = json.loads(app.status_payload(None))["firmware"]
+        self.assertEqual(firmware["version"], "1.2.3")
+        self.assertEqual(firmware["base_version"], app.BASE_VERSION)
+        app.ota_service(None, MagicMock())
+        report = next(
+            c.kwargs["body"] for c in app.ota_http.request.call_args_list if c.args[0] == "report"
+        )
+        self.assertEqual(
+            report,
+            {
+                "version": "1.2.3",
+                "base_version": app.BASE_VERSION,
+                "sequence": 9,
+                "state": "current",
+            },
+        )
+
     def test_active_hold_defers_update_network_calls(self):
         app = self.app
         app.ota_store = MagicMock(state={"trial": None})
@@ -240,7 +270,10 @@ class TransportTests(unittest.TestCase):
             context.wrap_socket.return_value = sock
             sock.send.side_effect = lambda data: min(7, len(data))
             sock.recv_into.side_effect = wire.recv_into
-            with patch("gate_http.ssl.create_default_context", return_value=context):
+            with (
+                patch("gate_http.ssl.create_default_context", return_value=context),
+                patch("gate_http.open", mock_open(read_data="public Google roots"), create=True),
+            ):
                 http = DeviceHTTP(pool, "device", "a" * 64)
                 if error:
                     with self.assertRaises(OSError):
@@ -250,6 +283,7 @@ class TransportTests(unittest.TestCase):
             context.wrap_socket.assert_called_once_with(
                 raw, server_hostname="drawbridge-45487.firebaseapp.com"
             )
+            context.load_verify_locations.assert_called_once_with(cadata="public Google roots")
             sock.close.assert_called_once()
             raw.close.assert_called_once()
 
@@ -263,6 +297,18 @@ class TransportTests(unittest.TestCase):
         ):
             response = self.response(b"HTTP/1.1 200 OK\r\n" + data)
             self.assertEqual(b"".join(response.chunks()), b"hello")
+
+    def test_circuitpython_buffers_do_not_support_item_deletion(self):
+        class CircuitPythonBuffer(bytearray):
+            def __delitem__(self, key):
+                raise TypeError("'bytearray' object doesn't support item deletion")
+
+            def __getitem__(self, key):
+                value = super().__getitem__(key)
+                return type(self)(value) if isinstance(key, slice) else value
+
+        with patch("gate_http.bytearray", CircuitPythonBuffer, create=True):
+            self.test_fragmented_length_and_chunked_bodies()
 
     def test_oversize_short_ambiguous_and_compressed_rejected(self):
         for headers in (

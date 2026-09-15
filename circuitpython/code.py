@@ -21,6 +21,7 @@ import supervisor
 from gate_mqtt import GateMQTT, NETWORK_SECONDS
 from drawbridge import Indicators, create_app, APP_VERSION
 from gate_hold import HoldState
+from gate_base import BASE_VERSION
 
 
 CONFIG_SIZE = min(512, len(microcontroller.nvm))
@@ -114,7 +115,11 @@ def initialize_application(allow_ota=True):
     application = factory(Platform(), time.monotonic())
     indicators = application.indicators
     log_event(
-        "application_ready", version=ota_version, ota_state=ota_state, board_id=str(board.board_id)
+        "application_ready",
+        version=ota_version,
+        base_version=BASE_VERSION,
+        ota_state=ota_state,
+        board_id=str(board.board_id),
     )
 
 
@@ -187,6 +192,7 @@ def ota_service(runtime, client):
             body={
                 "state": ota_state,
                 "version": ota_version,
+                "base_version": BASE_VERSION,
                 "sequence": ota_selected["sequence"] if ota_selected else 0,
             },
         )
@@ -548,7 +554,12 @@ def status_payload(runtime):
             "uptime_ms": int(time.monotonic() * 1000),
             "indicators": indicator_status(),
             "hold_remaining_seconds": hold.remaining(time.monotonic()),
-            "firmware": {"version": ota_version, "bootstrap": "1.0.0", "state": ota_state},
+            "firmware": {
+                "version": ota_version,
+                "bootstrap": BASE_VERSION,
+                "base_version": BASE_VERSION,
+                "state": ota_state,
+            },
         }
     )
 

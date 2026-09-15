@@ -58,6 +58,13 @@ test("device authentication is scoped, revocable, rate limited, and manifests ex
   await assert.rejects(service.authorize("other-device", token, "manifest"), {publicCode: "unauthenticated"});
   await service.report(f.id, {state: "current", version: "1.0.0", sequence: 0, extra: "secret"});
   assert.equal((await ref.get()).data().reportedFirmware.extra, undefined);
+  assert.equal((await ref.get()).data().reportedFirmware.base_version, null);
+  await service.report(f.id, {state: "current", version: "1.0.9", base_version: "1.0.1", sequence: 2});
+  assert.equal((await ref.get()).data().reportedFirmware.base_version, "1.0.1");
+  assert.equal((await ref.get()).data().reportedFirmware.version, "1.0.9");
+  for (const base_version of [null, "bad", "01.0.0", {}, true]) {
+    await assert.rejects(service.report(f.id, {state: "current", version: "1.0.9", base_version, sequence: 2}), {publicCode: "invalid-argument"});
+  }
   await assert.rejects(service.report(f.id, {state: "current", version: "bad", sequence: 0}), {publicCode: "invalid-argument"});
   await ref.update({enabled: false});
   await assert.rejects(service.authorize(f.id, token, "report"), {publicCode: "unauthenticated"});

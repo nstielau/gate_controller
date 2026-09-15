@@ -29,3 +29,11 @@ repos:
         args: [--fix]
       - id: ruff-format
         files: '^(circuitpython/(code|boot|drawbridge)\.py|circuitpython/lib/gate_(indicators|ota|http)\.py|test_suite/test_(indicators|ota)\.py|tools/(test_indicators|ota_provision|firmware_release)\.py)$'
+  - repo: local
+    hooks:
+      - id: protect-base-firmware
+        name: Protect USB-managed base firmware
+        entry: python tools/check_base_firmware.py
+        language: python
+        pass_filenames: false
+        always_run: true

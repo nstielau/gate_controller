@@ -69,7 +69,9 @@ See [the generated BOM](hardware/featherwing/bom.csv) for exact parts and
 [circuitpython/README.md](circuitpython/README.md) for the XIAO firmware wiring.
 Older files at the root of `hardware/` are reference designs, not this board.
 
-Generate the complete current fabrication package with `make featherwing-fab`.
+Commit all changes, then generate the fabrication package with `make featherwing-fab`.
+The build requires a clean checkout; revisions use the first three HEAD characters,
+and each ZIP records the full commit hash.
 Use the freshly generated files in `artifacts/featherwing/`; the
 [upload guide](hardware/featherwing/README.md#pcbway-upload) maps each file to its
 PCBWay or Seeed upload field.

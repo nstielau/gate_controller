@@ -28,12 +28,24 @@ If a build fails, the last complete release remains available; its timestamp in
 `manifest.json` identifies when it was built. Never upload after a failed build
 assuming that the files reflect your latest source changes.
 
-Each build derives its revision from the first three characters of the current
-Git `HEAD`. A clean tree produces `<ref>.0`; successful generations from a dirty
-tree increment the suffix (`<ref>.1`, `<ref>.2`, and so on). Failed builds do not
-consume a number because the previous complete release remains in place. The
-same revision is printed below the castle, recorded in `manifest.json`, and
-written to `REV_<revision>.txt`. That marker is included in all three ZIP files.
+Each build requires a **clean Git checkout**, including staged, unstaged, and
+untracked files anywhere in the repository. Commit changes before running the
+build. Ignored files such as credentials and `artifacts/` do not block it.
+There is no dirty-build override or generation counter.
+
+The revision is exactly the first three characters of Git `HEAD`, for example
+`abc`, with no suffix. It appears below the castle and in `manifest.json`.
+Every ZIP contains `REV_abc.txt` with both `abc` and the **full commit hash**;
+use the full hash to identify a commit unambiguously. Rebuilding the same commit
+keeps the same revision. The build checks checkout cleanliness and HEAD again
+before replacing the output.
+
+Generation runs on a temporary snapshot of committed sources and leaves the
+checkout unchanged. The freshly stamped native KiCad project is exported to
+`artifacts/featherwing/design/` and included in the combined ZIP. Open that
+project to inspect the current release; tracked native KiCad files are reference
+snapshots and may carry an older revision. Incorporate edits into the generator,
+commit them, then rebuild.
 
 Prerequisites: KiCad 10 in `/Applications/KiCad`, `make setup`, and the repository's
 Node/Playwright installation (`make web-setup`, then `npx playwright install chromium`

@@ -3,9 +3,27 @@ export function createAdminView({gateway, onClose}) {
   const root = document.querySelector("#admin-view"), output = document.querySelector("#admin-result");
   let epoch = 0, working = false;
   const element = (tag, text) => { const node = document.createElement(tag); node.textContent = text; return node; };
+  const tabs = [...root.querySelectorAll('[role="tab"]')];
+  function selectTab(selected) {
+    tabs.forEach(tab => {
+      const active = tab === selected;
+      tab.setAttribute("aria-selected", String(active));
+      tab.tabIndex = active ? 0 : -1;
+      document.getElementById(tab.getAttribute("aria-controls")).hidden = !active;
+    });
+  }
+  tabs.forEach((tab, index) => {
+    tab.onclick = () => selectTab(tab);
+    tab.onkeydown = event => {
+      const next = {ArrowRight: (index + 1) % tabs.length, ArrowLeft: (index + tabs.length - 1) % tabs.length, Home: 0, End: tabs.length - 1}[event.key];
+      if (next === undefined) return;
+      event.preventDefault();
+      selectTab(tabs[next]); tabs[next].focus();
+    };
+  });
   function lock(value) {
     working = value;
-    root.querySelectorAll("button,input,select").forEach(n => { n.disabled = value || !navigator.onLine; });
+    root.querySelectorAll('button:not([role="tab"]),input,select').forEach(n => { n.disabled = value || !navigator.onLine; });
   }
   async function change(data) {
     if (working || !navigator.onLine) return;
@@ -42,7 +60,7 @@ export function createAdminView({gateway, onClose}) {
       const card = element("article", "");
       card.append(element("h3", device.name), element("p", `Device: ${device.id}`));
       const report = device.reported;
-      card.append(element("p", report ? `Reported ${report.version} · ${report.state} · ${new Date(report.atMs).toLocaleString()}` : "No firmware report yet."));
+      card.append(element("p", report ? `App ${report.version} · Base ${report.base_version || "not reported"} · ${report.state} · ${new Date(report.atMs).toLocaleString()}` : "No firmware report yet."));
       card.append(element("p", device.target?.enabled ? `Target: ${device.target.version} (deployment ${device.target.sequence})` : "Automatic updates paused."));
       if (!device.enabled || !device.otaEnrolled) {
         card.append(element("p", !device.enabled ? "Device is disabled." : "USB OTA enrollment required."));
@@ -66,10 +84,10 @@ export function createAdminView({gateway, onClose}) {
     const email = document.querySelector("#admin-email").value.trim();
     if (confirm(`Give ${email} administrator access, including firmware targeting and administrator management?`)) change({action: "grantAdmin", email});
   };
-  document.querySelector("#admin-back").onclick = () => { close(); onClose(); };
   document.querySelector("#admin-refresh").onclick = () => open();
   function close() {
     epoch++; root.hidden = true; working = false; output.textContent = "";
+    selectTab(tabs[0]);
     document.querySelector("#admin-people").replaceChildren();
     document.querySelector("#admin-devices").replaceChildren();
     document.querySelector("#admin-email").value = "";

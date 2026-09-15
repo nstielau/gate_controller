@@ -3,14 +3,25 @@
 The implementation is opt-in and currently targets the XIAO ESP32S3 with
 CircuitPython 10, board ID `seeed_xiao_esp32_s3_sense` (the installed
 Sense firmware build). Its D0/D1/D2/D9/D10 assignments match the documented XIAO
-header pins. OTA activation and recovery are not yet validated on a physical board. Do not enable a
-field controller until the bench checklist below passes. The FeatherWing PCB's
-portable headers do not imply that these XIAO firmware pins work on a Feather.
+header pins. Initial installation and rollback have passed physical bench
+checks; recovery and power-loss qualification is still in progress. Do not
+enable a field controller until the checklist below passes. The FeatherWing
+PCB's portable headers do not imply that these XIAO firmware pins work on a Feather.
 
-USB baseline installed on device `b3640c` on 2026-09-14: CircuitPython 10.3.0,
-application 1.0.0, Wi-Fi/MQTT connected. Its per-device credential is enrolled
-and provisioned, with `OTA_ENABLED = 0`. No OTA release has been assigned.
-This verifies the USB recovery application, not an over-the-air installation.
+Device `b3640c` is enrolled and opted in (`OTA_ENABLED = 1`). It installed and
+confirmed release 1.0.0 over TLS as sequence 2. Deliberate syntax-error,
+startup-exception and watchdog-lockup candidates rolled back to that confirmed
+copy. Approved release 1.0.0 is now assigned as sequence 6, above the fault-test
+sequences. See [the bench validation record](ota-bench-validation.md) for
+observed results, local evidence and outstanding checks. GPIO logs establish
+software writes, not electrical output or gate position.
+
+The bench probe found three bootstrap issues that host tests missed: CircuitPython
+does not support bytearray slice deletion, and its built-in certificate bundle
+failed Firebase verification, and CircuitPython 10.1+ returns the OTA enable
+setting as a string. Use the corrected USB deployment, including
+`certs/google-roots.pem`; the source archive at the initial firmware-v1.0.0 tag
+predates these fixes. The release's application file itself is unchanged.
 
 ## Administrators
 
@@ -47,6 +58,9 @@ increment a deployment twice. Use Refresh after an uncertain response.
   `lib/gate_http.py` is a bounded HTTPS client. Both are USB-managed.
 - Root `drawbridge.py` is the USB-installed recovery application. It contains
   command policy and the independent indicator timers.
+- `certs/google-roots.pem` contains Google's public GTS roots for Firebase TLS,
+  loaded explicitly with hostname verification. It is USB-managed; certificate
+  sources and update guidance are in `circuitpython/certs/README.md`.
 - `/ota/app0.py` and `/ota/app1.py` are OTA slots. Only one verified candidate
   is selected at a time. OTA never overwrites the root recovery copy.
 - `/ota/state0.json` and `/ota/state1.json` alternate checksummed generations.
@@ -110,6 +124,38 @@ To revoke a lost OTA credential, delete `otaCredentialHash` from that device
 using project IAM and pause its target. Rotate the device and the ignored local
 credential deliberately; it is independent of its MQTT identity.
 
+## Base and application versions
+
+Normal OTA development edits only `circuitpython/drawbridge.py`. The USB-managed
+base is `boot.py`, `code.py`, libraries and public certificates. The pre-commit
+guard rejects staged base changes unless they include an increased
+`BASE_VERSION` in `lib/gate_base.py` and a change note in
+`docs/base-firmware/<version>.md`. It checks the index, so an unstaged bump does
+not approve a staged edit. It also catches removed/renamed files and MPY changes.
+This is an accident-prevention guard, not a security boundary against an actor
+who can change hooks; do not bypass it with SKIP or --no-verify.
+
+The device reports two independent versions: `version` is the selected app,
+`base_version` is the installed USB bundle. MQTT also preserves the `bootstrap`
+alias. Administration shows, for example, “App 1.0.9 · Base 1.0.1”. These are
+separate release histories, not numbers to subtract. The timestamp still means
+last report, not current reachability. Older reports show “Base not reported”.
+The CircuitPython interpreter and app compatibility API are separate again.
+
+Future GitHub releases bundle `base-firmware.zip` and `base-manifest.json`
+alongside the single-file OTA app and its manifest. The base manifest records
+its semantic version, full release commit and file hashes. Its aggregate hash
+excludes the bundled root recovery app, whose hash is recorded separately.
+Two app releases may therefore carry the same base version/digest. The ZIP is
+for deliberate USB maintenance and excludes device settings, credentials and
+the CircuitPython interpreter. Firebase continues to mirror only drawbridge.py.
+The existing 1.0.0/1.0.1 releases are unchanged.
+
+Base 1.0.1 adds reporting and incorporates the previously tested USB fixes.
+It has not been installed on the board yet. Install through the existing D9
+maintenance workflow and run hardware verification before claiming the new base
+is in use. An OTA-only upgrade cannot add reporting to an older bootstrap.
+
 ## Releasing and selecting firmware
 
 Release assets come from a clean, tagged Git commit. Update `APP_VERSION` in
@@ -123,8 +169,8 @@ make firmware-import VERSION=1.0.1
 ```
 
 Build runs offline tests and checks that the application's version/API matches
-the tag at HEAD. Publish creates a GitHub Release containing `drawbridge.py` and
-`manifest.json`. Import verifies the published tag, source commit, bytes, size,
+the tag at HEAD. Publish creates a GitHub Release containing `drawbridge.py`,
+`manifest.json`, `base-firmware.zip`, and `base-manifest.json`. Import verifies the published tag, source commit, bytes, size,
 and SHA-256, then mirrors the file to a create-only object in the private
 `drawbridge-45487-firmware` bucket. It creates an approved, immutable manifest in
 `firmwareReleases/<version>`. Only local IAM tooling can import releases; the

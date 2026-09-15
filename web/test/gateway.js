@@ -10,7 +10,7 @@ export async function createGateway() {
     async adminOverview() {
       if (scenario === "admin-revoked") throw new Error("revoked");
       window.__admins ||= [{email: "nick.stielau@gmail.com", owner: true}];
-      return {admins: window.__admins, devices: [{id: "test-device", name: "Garden gate", enabled: true, otaEnrolled: true, target: window.__target || null, reported: null}], releases: [{version: "1.0.0"}]};
+      return {admins: window.__admins, devices: [{id: "test-device", name: "Garden gate", enabled: true, otaEnrolled: true, target: window.__target || null, reported: window.__firmwareReport || null}], releases: [{version: "1.0.0"}]};
     },
     async adminChange(data) {
       window.__adminChanges ||= []; window.__adminChanges.push(data);

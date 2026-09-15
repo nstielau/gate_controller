@@ -10,6 +10,7 @@ import time
 
 HOST = "drawbridge-45487.firebaseapp.com"
 PREFIX = "/device-api/v1/"
+CA_FILE = "/certs/google-roots.pem"
 # Allowed device-ID characters, not a credential.
 DEVICE_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789-"  # pragma: allowlist secret
 
@@ -67,7 +68,7 @@ class Response:
             self.receive()
         index = self.buffer.index(b"\r\n")
         result = bytes(self.buffer[:index])
-        del self.buffer[: index + 2]
+        self.buffer = self.buffer[index + 2 :]
         self.header_bytes += index + 2
         if self.header_bytes > 8192:
             raise ValueError("headers_too_large")
@@ -78,7 +79,7 @@ class Response:
             self.receive()
         count = min(count, len(self.buffer), 512)
         result = bytes(self.buffer[:count])
-        del self.buffer[:count]
+        self.buffer = self.buffer[count:]
         return result
 
     def chunks(self):
@@ -131,6 +132,8 @@ class DeviceHTTP:
         try:
             raw.settimeout(5)
             context = ssl.create_default_context()
+            with open(CA_FILE) as certificates:
+                context.load_verify_locations(cadata=certificates.read())
             sock = context.wrap_socket(raw, server_hostname=HOST)
             sock.settimeout(5)
             service()

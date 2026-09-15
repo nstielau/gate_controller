@@ -10,6 +10,16 @@
   runs ERC/DRC, and rebuilds **all** ZIPs and loose exports, including board and
   schematic previews, logo, Gerbers, drills, BOM, positions, netlist, and reports.
   Requires installed KiCad 10 plus the repo's Node/Playwright dependencies.
+- Fabrication requires a clean repository: reject staged, unstaged, and untracked
+  changes anywhere; ignored files are excluded. Commit before building; never
+  bypass the check or commit unrelated work just to satisfy it. The revision is
+  exactly the first three HEAD characters with no suffix. Every ZIP includes
+  `REV_<ref>.txt` containing the short revision and full commit hash; the manifest
+  also records the full hash. There is no dirty-build counter.
+- Generate from a temporary committed snapshot, leaving tracked files unchanged.
+  Fresh native KiCad files are in `artifacts/featherwing/design/` and the combined
+  ZIP; tracked native files are reference snapshots. Recheck HEAD and cleanliness
+  before publishing output. Tests for this workflow use isolated Git fixtures.
 - `artifacts/featherwing/` is disposable build output. Each successful build
   replaces the entire directory, removing old attempts and extracted ZIPs.
   Never store source/manual edits there. Other artifact directories are separate.
@@ -197,6 +207,45 @@
   requested hold LED; it is a strapping pin, so do not pull it HIGH or externally
   drive it during reset. Keep USB GPIO19/20 unused; preserve D6/D7 for serial.
 
+# OTA editing boundary and versions
+
+- Default firmware work belongs in `circuitpython/drawbridge.py` and its tests.
+  That is the only file delivered OTA. Do not change USB-managed files as an
+  incidental part of an application change. Base edits require a task that
+  explicitly calls for networking, loader, pin, library, certificate, or base
+  behavior changes; the independent version-reporting work is one such change.
+- Protected base: all Python/MPY/certificate files under `circuitpython/` except
+  root `drawbridge.py`. This includes `boot.py`, `code.py`, `lib/` and public
+  roots. OTA never modifies these or the root recovery app. Device credentials,
+  settings and NVM are separate and never belong in a release.
+- `APP_VERSION` identifies the running application. `BASE_VERSION` in
+  `circuitpython/lib/gate_base.py` identifies the installed USB bundle, independent
+  of the CircuitPython interpreter version and application compatibility API.
+  An app-only update does not bump BASE_VERSION. App and base version numbers
+  need not match; report the actual pair rather than calculating a numeric gap.
+- The installed pre-commit configuration runs `tools/check_base_firmware.py`.
+  It examines staged bytes, including deletions/renames and binary libraries.
+  Base changes require a strictly increased staged BASE_VERSION and a staged
+  `docs/base-firmware/<version>.md` explaining the change and USB validation.
+  Stage all intended base files together with the bump/note. Do not use SKIP or
+  --no-verify to bypass this guard. It guards commits, not editor saves; review
+  the diff before deployment. All-files hook runs still inspect the index.
+- `make firmware-build VERSION=x.y.z` requires a clean tagged commit and tests.
+  Future releases contain `drawbridge.py`, OTA `manifest.json`, `base-firmware.zip`
+  and `base-manifest.json`. The latter records base version, full release commit,
+  per-file SHA-256 and an aggregate base digest. The ZIP also includes the root
+  recovery app; its hash is separate, so app-only updates preserve base identity.
+  Existing releases remain immutable. Firebase imports only the OTA application.
+- MQTT status and Firebase reports include the running app and base versions;
+  Administration displays both. Legacy boards omit base_version and must show
+  “not reported”, never an inferred base from the assigned release. A one-time
+  USB update is needed for this new reporting; publishing an OTA app cannot
+  retrofit the base. Do not describe a locally edited base as installed.
+- Base 1.0.1 includes the prior bench fixes and dual-version reporting. It has
+  host validation only until an intentional USB install and hardware checks.
+  Before release/deploy run `make test`, `make precommit`; for server/UI changes
+  also run `make web-test`. Follow the physical checks in `docs/ota-operations.md`.
+
 # OTA and application administrators
 
 - Read `docs/ota-operations.md` for actual behavior; `docs/ota-upgrades.md` is
@@ -213,8 +262,18 @@
   power-loss/TLS/recovery checks before enabling field OTA. USB baseline was
   deployed to b3640c on CircuitPython 10.3.0 (board ID
   `seeed_xiao_esp32_s3_sense`); application 1.0.0 reconnects to Wi-Fi/MQTT.
-  OTA is still disabled; real OTA transfers, recovery and power-loss tests
-  remain outstanding. Do not confuse baseline operation with OTA validation.
+  The board installed and confirmed release 1.0.0 (sequence 2) via TLS, then
+  recovered from local syntax-error, startup-exception and watchdog-loop trials.
+  Sequence 6 also installed and confirmed after a successful hold-deferral test.
+  See `docs/ota-bench-validation.md` for current
+  evidence and pending tests. D9 recovery must be repeated with the boot setting
+  fix; power-loss qualification remains outstanding.
+- CircuitPython bytearrays do not support item deletion; use slicing in the
+  bounded HTTP parser. Firebase needs the explicit public Google roots deployed
+  from `circuitpython/certs/google-roots.pem`. Never disable TLS verification.
+- CircuitPython 10.1+ getenv returns strings even for TOML integers. Both boot.py
+  and code.py must accept the string "1" for OTA opt-in. GATE_BOOT records the
+  actual USB/maintenance/OTA mode; check it when testing the recovery jumper.
 - Admin roles use verified Google emails in server-owned `admins/` records.
   Nick is seeded via `make admin-seed`; owner removal is blocked. Browser roles
   require App Check and a fresh transactional check on every admin mutation.

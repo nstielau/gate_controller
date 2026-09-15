@@ -239,6 +239,8 @@ class DeploymentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "circuitpython/lib").mkdir(parents=True)
+            (root / "circuitpython/certs").mkdir()
+            (root / "circuitpython/certs/google-roots.pem").write_text("public Google roots")
             (root / "board/lib").mkdir(parents=True)
             (root / "circuitpython/lib/fix.py").write_text("new library")
             (root / "circuitpython/drawbridge.py").write_text("# app\n")

@@ -24,8 +24,8 @@ SUPPORT = Path(
 )
 NAME = "drawbridge-featherwing"
 ROOT_ID = str(uuid.uuid5(uuid.NAMESPACE_URL, NAME))
-REVISION = os.environ.get("DRAWBRIDGE_REV", "dev.0")
-if not re.fullmatch(r"[0-9a-z]{3}\.\d+", REVISION):
+REVISION = os.environ.get("DRAWBRIDGE_REV", "")
+if not re.fullmatch(r"[0-9a-f]{3}", REVISION):
     raise RuntimeError(f"Invalid DRAWBRIDGE_REV: {REVISION!r}")
 
 

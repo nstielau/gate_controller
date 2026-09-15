@@ -27,6 +27,7 @@ def deploy(destination):
     files = [(path.relative_to(app), path.read_bytes()) for path in sorted((app / "lib").rglob("*"))
              if path.is_file() and path.suffix in (".py", ".mpy")]
     files.extend([
+        (Path("certs/google-roots.pem"), (app / "certs/google-roots.pem").read_bytes()),
         (Path("certs/emqxsl-ca.crt"), ca_file.read_bytes()),
         (Path("settings.toml"), settings.encode()),
         (Path("drawbridge.py"), (app / "drawbridge.py").read_bytes()),

@@ -236,12 +236,24 @@ test("admin manages roles and firmware on mobile without publishing holds", asyn
   await page.locator("#admin-open").click();
   await expect(page.locator("#admin-view")).toBeVisible();
   await expect(page.locator("#controls")).toBeHidden();
+  await expect(page.getByRole("tab", {name: "Admins", exact: true})).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#admin-panel-firmware")).toBeHidden();
+  await expect(page.locator("#admin-back")).toHaveCount(0);
   await expect(page.locator("#admin-people")).toContainText("nick.stielau@gmail.com");
   await page.locator("#admin-email").fill("jess@example.test");
   await page.getByRole("button", {name: "Add administrator", exact: true}).click();
   await expect(page.locator("#admin-people")).toContainText("jess@example.test");
   await page.getByRole("button", {name: "Remove", exact: true}).click();
   await expect(page.locator("#admin-people")).not.toContainText("jess@example.test");
+  const firmwareTab = page.getByRole("tab", {name: "Device Firmware", exact: true});
+  await page.getByRole("tab", {name: "Admins", exact: true}).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(firmwareTab).toBeFocused();
+  await expect(firmwareTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#admin-panel-people")).toBeHidden();
+  await page.getByRole("button", {name: "Refresh administration", exact: true}).click();
+  await expect(page.getByRole("button", {name: "Refresh administration", exact: true})).toBeEnabled();
+  await expect(firmwareTab).toHaveAttribute("aria-selected", "true");
   await page.getByLabel("Firmware release for Garden gate").selectOption("1.0.0");
   await page.getByRole("button", {name: "Assign release", exact: true}).click();
   await expect(page.locator("#admin-devices")).toContainText("Target: 1.0.0");
@@ -250,9 +262,12 @@ test("admin manages roles and firmware on mobile without publishing holds", asyn
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({path: "artifacts/admin-" + test.info().project.name + ".png", fullPage: true});
   await context.setOffline(true);
+  await expect(page.getByRole("button", {name: "Assign release", exact: true})).toBeDisabled();
+  await page.getByRole("tab", {name: "Admins", exact: true}).click();
   await expect(page.getByRole("button", {name: "Add administrator", exact: true})).toBeDisabled();
   await context.setOffline(false);
-  await page.locator("#admin-back").click();
+  expect(await page.evaluate(() => window.__commands || [])).toEqual([]);
+  await page.getByRole("link", {name: "Drawbridge home"}).click();
   await expect(page.locator("#controls")).toBeVisible();
   expect(await page.evaluate(() => window.__commands || [])).toEqual([]);
   await page.locator("#account-menu-button").click();
@@ -267,4 +282,19 @@ test("revoked role cannot open admin data even if its menu was previously visibl
   await page.locator("#admin-open").click();
   await expect(page.locator("#admin-view")).toBeHidden();
   await expect(page.locator("#result")).toContainText("Administrator access unavailable");
+});
+
+test("firmware shows independently reported base and app versions, including legacy boards", async ({page}) => {
+  await page.addInitScript(() => {
+    window.__scenario = "admin";
+    window.__firmwareReport = {version: "1.0.9", base_version: "1.0.1", state: "current", atMs: Date.now()};
+  });
+  await page.goto("/");
+  await page.locator("#account-menu-button").click();
+  await page.locator("#admin-open").click();
+  await page.getByRole("tab", {name: "Device Firmware", exact: true}).click();
+  await expect(page.locator("#admin-devices")).toContainText("App 1.0.9 · Base 1.0.1");
+  await page.evaluate(() => { delete window.__firmwareReport.base_version; });
+  await page.getByRole("button", {name: "Refresh administration"}).click();
+  await expect(page.locator("#admin-devices")).toContainText("App 1.0.9 · Base not reported");
 });

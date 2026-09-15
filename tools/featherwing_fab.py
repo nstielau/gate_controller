@@ -46,47 +46,42 @@ def run(*args):
     subprocess.run([str(KICAD), *map(str, args)], check=True)
 
 
-def determine_revision(output=OUTPUT):
-    """Return a stable clean revision or the next successful dirty generation."""
+def determine_revision():
+    """Only committed inputs may produce a fabrication release."""
     head = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    if len(head) < 3:
+        raise RuntimeError("Git HEAD is too short to form a fabrication revision")
+    status = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none"],
         cwd=ROOT,
         check=True,
         capture_output=True,
         text=True,
-    ).stdout.strip()
-    if len(head) < 3:
-        raise RuntimeError("Git HEAD is too short to form a fabrication revision")
-    dirty = bool(
+    ).stdout
+    if status:
+        raise RuntimeError(
+            "Fabrication requires a clean Git checkout. Commit staged, unstaged, and "
+            "untracked changes before building; see git status --short. "
+            "Existing artifacts have not been replaced."
+        )
+    return {"revision": head[:3].lower(), "git_head": head, "dirty": False}
+
+
+def snapshot_sources(directory, head):
+    """Extract committed inputs so generation never modifies the checkout."""
+    directory.mkdir()
+    archive = directory.parent / "sources.tar"
+    with archive.open("wb") as target:
         subprocess.run(
-            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            ["git", "archive", head, "hardware/featherwing", "tools/render_featherwing.mjs"],
             cwd=ROOT,
+            stdout=target,
             check=True,
-            capture_output=True,
-            text=True,
-        ).stdout
-    )
-    previous = {}
-    manifest = output / "manifest.json"
-    if manifest.is_file():
-        try:
-            previous = json.loads(manifest.read_text())
-        except (json.JSONDecodeError, OSError):
-            previous = {}
-    generation = 0
-    if dirty:
-        generation = 1
-        if previous.get("git_head") == head and previous.get("dirty") is True:
-            old_generation = previous.get("dirty_generation")
-            if isinstance(old_generation, int) and old_generation >= 1:
-                generation = old_generation + 1
-    short_ref = head[:3].lower()
-    return {
-        "revision": f"{short_ref}.{generation}",
-        "git_head": head,
-        "dirty": dirty,
-        "dirty_generation": generation,
-    }
+        )
+    subprocess.run(["tar", "-xf", str(archive), "-C", str(directory)], check=True)
+    return directory / "hardware/featherwing"
 
 
 def revision_marker(release):
@@ -96,11 +91,11 @@ def revision_marker(release):
     return markers[0]
 
 
-def regenerate_design(revision):
+def regenerate_design(revision, design):
     env = os.environ.copy()
     env["PYTHONPATH"] = str(KICAD_PYTHON.parent.parent / "lib/python3.9/site-packages")
     env["DRAWBRIDGE_REV"] = revision
-    subprocess.run([str(KICAD_PYTHON), str(DESIGN / "generate.py")], env=env, check=True)
+    subprocess.run([str(KICAD_PYTHON), str(design / "generate.py")], env=env, check=True)
 
 
 def archive_maps(release):
@@ -137,6 +132,9 @@ def archive_maps(release):
 
 def package_release(release, revision_info):
     """Build all archives, compare every member, and inventory all loose/ZIP files."""
+    revision_marker(release).write_text(
+        revision_info["revision"] + "\nGit commit: " + revision_info["git_head"] + "\n"
+    )
     for name, members in archive_maps(release).items():
         with zipfile.ZipFile(release / name, "w", zipfile.ZIP_DEFLATED) as archive:
             for member, path in members.items():
@@ -276,14 +274,16 @@ def replace_release(staging, output):
             raise
 
 
-def export_release(release, revision):
+def export_release(release, revision, design):
+    board = design / f"{NAME}.kicad_pcb"
+    schematic = design / f"{NAME}.kicad_sch"
     gerbers, drills = release / "gerbers", release / "drills"
     gerbers.mkdir()
     drills.mkdir()
-    run("sch", "erc", SCHEMATIC, "--exit-code-violations", "-o", release / "erc.rpt")
-    run("pcb", "drc", BOARD, "--exit-code-violations", "-o", release / "drc.rpt")
+    run("sch", "erc", schematic, "--exit-code-violations", "-o", release / "erc.rpt")
+    run("pcb", "drc", board, "--exit-code-violations", "-o", release / "drc.rpt")
     run(
-        "sch", "export", "netlist", SCHEMATIC, "--format", "kicadxml", "-o", release / "netlist.xml"
+        "sch", "export", "netlist", schematic, "--format", "kicadxml", "-o", release / "netlist.xml"
     )
     run(
         "pcb",
@@ -293,7 +293,7 @@ def export_release(release, revision):
         gerbers,
         "--layers",
         "F.Cu,B.Cu,F.Mask,B.Mask,F.Silkscreen,Edge.Cuts",
-        BOARD,
+        board,
     )
     run(
         "pcb",
@@ -306,7 +306,7 @@ def export_release(release, revision):
         "--excellon-units",
         "mm",
         "--excellon-separate-th",
-        BOARD,
+        board,
     )
     run(
         "pcb",
@@ -320,10 +320,10 @@ def export_release(release, revision):
         "mm",
         "--side",
         "both",
-        BOARD,
+        board,
     )
-    run("sch", "export", "pdf", SCHEMATIC, "-o", release / "schematic.pdf")
-    run("sch", "export", "svg", SCHEMATIC, "-o", release / "schematic-svg")
+    run("sch", "export", "pdf", schematic, "-o", release / "schematic.pdf")
+    run("sch", "export", "svg", schematic, "-o", release / "schematic-svg")
     svg_files = list((release / "schematic-svg").glob("*.svg"))
     if len(svg_files) != 1:
         raise RuntimeError("Expected the single-sheet schematic SVG")
@@ -333,7 +333,7 @@ def export_release(release, revision):
         "pcb",
         "export",
         "svg",
-        BOARD,
+        board,
         "-o",
         release / "silkscreen.svg",
         "--layers",
@@ -346,7 +346,7 @@ def export_release(release, revision):
     run(
         "pcb",
         "render",
-        BOARD,
+        board,
         "-o",
         release / "board.png",
         "--width",
@@ -356,19 +356,24 @@ def export_release(release, revision):
         "--side",
         "top",
     )
-    shutil.copyfile(DESIGN / "bom.csv", release / "assembly-bom.csv")
-    write_bom_xlsx(DESIGN / "bom.csv", release / "assembly-bom.xlsx")
-    write_seeed_bom(DESIGN / "bom.csv", release / "seeed-assembly-bom.csv")
-    shutil.copyfile(DESIGN / "README.md", release / "assembly-notes.txt")
+    shutil.copyfile(design / "bom.csv", release / "assembly-bom.csv")
+    write_bom_xlsx(design / "bom.csv", release / "assembly-bom.xlsx")
+    write_seeed_bom(design / "bom.csv", release / "seeed-assembly-bom.csv")
+    shutil.copyfile(design / "README.md", release / "assembly-notes.txt")
     shutil.copyfile(
-        DESIGN / "assets/drawbridge-silkscreen.svg", release / "drawbridge-silkscreen.svg"
+        design / "assets/drawbridge-silkscreen.svg", release / "drawbridge-silkscreen.svg"
     )
-    subprocess.run(["node", str(ROOT / "tools/render_featherwing.mjs"), str(release)], check=True)
+    subprocess.run(
+        ["node", str(design.parents[1] / "tools/render_featherwing.mjs"), str(release)], check=True
+    )
     (release / "fabrication-checks.txt").write_text(
         "ERC and DRC passed with --exit-code-violations. See erc.rpt and drc.rpt.\n"
         "J3 pin 1: OUT_OC; pin 2: GND. The Feather host is excluded from assembly.\n"
         "Logo SVG and PNG are references; the same vector geometry is already in F.Silkscreen.\n"
         "See manifest.json for build time and SHA-256 of every generated file and ZIP.\n"
+    )
+    shutil.copytree(
+        design, release / "design", ignore=shutil.ignore_patterns("generate.py", "__pycache__")
     )
     marker_name = f"REV_{revision}.txt"
     (release / marker_name).write_text(revision + "\n")
@@ -410,14 +415,19 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise SystemExit("Another FeatherWing build is running") from None
+        revision_info = determine_revision()
         with tempfile.TemporaryDirectory(prefix=".featherwing-build-", dir=OUTPUT.parent) as temp:
             release = Path(temp) / "release"
             release.mkdir()
-            revision_info = determine_revision(OUTPUT)
             revision = revision_info["revision"]
-            regenerate_design(revision)
-            export_release(release, revision)
+            design = snapshot_sources(Path(temp) / "source", revision_info["git_head"])
+            regenerate_design(revision, design)
+            export_release(release, revision, design)
             package_release(release, revision_info)
+            if determine_revision() != revision_info:
+                raise RuntimeError(
+                    "Git HEAD changed during fabrication; previous artifacts preserved"
+                )
             replace_release(release, OUTPUT)
     print(
         f"Replaced {OUTPUT} with revision {revision} "
@@ -426,4 +436,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except RuntimeError as error:
+        raise SystemExit(str(error)) from None

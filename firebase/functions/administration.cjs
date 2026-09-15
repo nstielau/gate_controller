@@ -118,9 +118,10 @@ function createDeviceService(db, now = Date.now) {
     async report(deviceId, value) {
       if (!value || !["current", "trial", "rolled_back", "error", "disabled"].includes(value.state) ||
           !VERSION.test(value.version || "") || !Number.isSafeInteger(value.sequence) || value.sequence < 0 ||
-          (value.reason !== undefined && !/^[a-z_]{1,40}$/.test(value.reason))) fail("invalid-argument", "Invalid firmware report.");
+          (value.reason !== undefined && !/^[a-z_]{1,40}$/.test(value.reason)) ||
+          (value.base_version !== undefined && (typeof value.base_version !== "string" || !VERSION.test(value.base_version)))) fail("invalid-argument", "Invalid firmware report.");
       await db.doc("devices/" + deviceId).update({reportedFirmware: {
-        state: value.state, version: value.version, sequence: value.sequence,
+        state: value.state, version: value.version, base_version: value.base_version || null, sequence: value.sequence,
         reason: value.reason || null, atMs: now()
       }});
     }
