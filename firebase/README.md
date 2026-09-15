@@ -6,7 +6,7 @@ authentication. Keep `web/origin.mjs` aligned with Google's OAuth redirect URI:
 `https://drawbridge-45487.firebaseapp.com/__/auth/handler`. Firebase authorized
 domains and Google OAuth redirect URIs are separate settings. Do not switch
 `authDomain` to `.web.app` without first registering its callback with Google.
-The mobile app offers **1 minute, 15 minutes, 1 hour, 6 hours**, and
+The mobile app offers **1 minute, 15 minutes, 60 minutes, 6 hours**, and
 **End hold**. A six-hour hold asks for confirmation. Add it to your phone's
 home screen for quick access.
 
