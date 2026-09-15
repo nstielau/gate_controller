@@ -84,7 +84,10 @@ and `drills/`. Each run refreshes `board.png`, `schematic.pdf`, `schematic.svg`,
 `erc.rpt`, `drc.rpt`, and assembly notes. `manifest.json` records the build time
 and SHA-256 for every loose file and ZIP (excluding the manifest itself).
 The BOM is emitted as both `assembly-bom.xlsx` for PCBWay and `assembly-bom.csv`
-for review.
+for review. Both include an explicit `Tolerance` column: all five resistors
+(R1–R5) have a tolerance of **5%**. R1/R3/R4/R5 are 1 kΩ Yageo
+CFR-25JB-52-1K; R2 is 100 kΩ Yageo MFR50SJT-52-100K. Use 5% for the
+PCBWay assembly specification; 1% is not required.
 
 The isometric castle logo uses a 14 × 14 mm SVG canvas with 0.18 mm strokes.
 The actual mark occupies about 12 × 12.5 mm on the USB end. The generator imports

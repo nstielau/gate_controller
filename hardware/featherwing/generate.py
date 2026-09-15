@@ -715,6 +715,7 @@ if __name__ == "__main__":
         "D2": ("3 mm blue LED, THT", "Everlight", "204-10SUBC/S400-A4"),
         "D3": ("3 mm green LED, THT", "Everlight", "204-10SUGD/S400-A5"),
     }
+    resistor_tolerances = dict.fromkeys(("R1", "R2", "R3", "R4", "R5"), "5%")
     with (HERE / "bom.csv").open("w", newline="") as f:
         w = csv.writer(f, lineterminator="\n")
         w.writerow(
@@ -722,6 +723,7 @@ if __name__ == "__main__":
                 "Reference",
                 "Value",
                 "Description",
+                "Tolerance",
                 "Manufacturer",
                 "Manufacturer Part Number",
                 "Footprint",
@@ -731,5 +733,7 @@ if __name__ == "__main__":
         )
         for ref, value, _, fp, *rest in PARTS:
             desc, manufacturer, mpn = bom_parts[ref]
-            w.writerow([ref, value, desc, manufacturer, mpn, fp, 1, "Yes"])
+            w.writerow(
+                [ref, value, desc, resistor_tolerances.get(ref, ""), manufacturer, mpn, fp, 1, "Yes"]
+            )
     print("Generated review schematic, PCB and BOM")
