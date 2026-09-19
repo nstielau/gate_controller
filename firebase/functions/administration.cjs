@@ -127,4 +127,4 @@ function createDeviceService(db, now = Date.now) {
     }
   };
 }
-module.exports = {createAdministration, createDeviceService, validateManifest, hash, OWNER};
+module.exports = {createAdministration, createDeviceService, validateManifest, hash, OWNER, emailAddress};

@@ -219,6 +219,74 @@ test("failed nickname save preserves the existing name and the draft", async ({p
   await expect(page.locator("#nickname")).toHaveValue("Front gate");
   await expect(page.locator("#device option:checked")).toHaveText("Garden gate");
 });
+test("assigned users invite by email to the selected device without sending a gate command", async ({page}) => {
+  await page.goto("/");
+  await page.locator("#device").selectOption("second-device");
+  await page.locator("#account-menu-button").click();
+  await expect(page.locator("#admin-open")).toBeHidden();
+  await page.locator("#invite").click();
+  await expect(page.locator("#invite-device")).toHaveText("Invite to Driveway (second-device)");
+  await expect(page.locator("#invite-email")).toBeFocused();
+  await expect(page.locator("#invite-hint")).toContainText("no email is sent");
+  await page.locator("#invite-email").fill("Guest@Example.test");
+  await page.locator("#invite-save").click();
+  await expect(page.locator("#invite-save")).toBeDisabled();
+  await expect(page.locator("#device")).toBeDisabled();
+  await expect(page.locator("#invite-result")).toHaveText("Access granted to guest@example.test.");
+  await expect(page.locator("#invite-share a")).toHaveAttribute("href", "https://drawbridge-45487.firebaseapp.com");
+  const invitations = await page.evaluate(() => window.__invitations);
+  expect(invitations).toHaveLength(1);
+  expect(invitations[0]).toMatchObject({deviceId: "second-device", email: "Guest@Example.test"});
+  expect(invitations[0].requestId).toMatch(/^[a-f0-9-]{36}$/);
+  expect(invitations[0].issuedAtMs).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.__commands || [])).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({path: "artifacts/invite-" + test.info().project.name + ".png", fullPage: true});
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#invite-form")).toBeHidden();
+  await expect(page.locator("#invite-email")).toHaveValue("");
+});
+test("invitations validate email, cancel drafts, and stay disabled offline or without access", async ({page, context}) => {
+  await page.goto("/");
+  await page.locator("#account-menu-button").click();
+  await page.locator("#invite").click();
+  await page.locator("#invite-email").fill("invalid-email");
+  await page.locator("#invite-save").click();
+  expect(await page.evaluate(() => window.__invitations || [])).toEqual([]);
+  await page.locator("#invite-email").fill("guest@example.test");
+  await context.setOffline(true);
+  await expect(page.locator("#invite-save")).toBeDisabled();
+  await context.setOffline(false);
+  await expect(page.locator("#invite-save")).toBeEnabled();
+  expect(await page.evaluate(() => window.__invitations || [])).toEqual([]);
+  await page.locator("#invite-cancel").click();
+  await expect(page.locator("#invite-form")).toBeHidden();
+  await expect(page.locator("#invite")).toBeFocused();
+  await page.locator("#invite").click();
+  await expect(page.locator("#invite-email")).toHaveValue("");
+  await page.locator("#rename").click();
+  await expect(page.locator("#invite-form")).toBeHidden();
+  await page.addInitScript(() => { window.__scenario = "unauthorized"; });
+  await page.reload();
+  await page.locator("#account-menu-button").click();
+  await expect(page.locator("#invite")).toBeDisabled();
+});
+for (const scenario of ["invite-failure", "invite-revoked"]) {
+  test(`${scenario} preserves email and shows the failure without retrying`, async ({page}) => {
+    await page.addInitScript(value => { window.__scenario = value; }, scenario);
+    await page.goto("/");
+    await page.locator("#account-menu-button").click();
+    await page.locator("#invite").click();
+    await page.locator("#invite-email").fill("guest@example.test");
+    await page.locator("#invite-save").click();
+    await expect(page.locator("#invite-result")).toContainText(scenario === "invite-failure" ? "Couldn't confirm access" : "You cannot invite users");
+    await expect(page.locator("#invite-email")).toHaveValue("guest@example.test");
+    await expect(page.locator("#invite-share")).toBeHidden();
+    await expect(page.locator("#invite-save")).toBeEnabled();
+    expect(await page.evaluate(() => window.__invitations.length)).toBe(1);
+    expect(await page.evaluate(() => window.__commands || [])).toEqual([]);
+  });
+}
 test("only administrators see Administration in the profile dropdown", async ({page}) => {
   await page.goto("/");
   await page.locator("#account-menu-button").click();

@@ -2,6 +2,8 @@ const {onCall, HttpsError} = require("firebase-functions/v2/https");
 const {defineSecret} = require("firebase-functions/params");
 const {initializeApp} = require("firebase-admin/app");
 const {getFirestore} = require("firebase-admin/firestore");
+const {getAuth} = require("firebase-admin/auth");
+const {createDeviceAccess} = require("./device-access.cjs");
 const {createController} = require("./controller.cjs");
 const {createStore} = require("./store.cjs");
 const {publishHold} = require("./mqtt.cjs");
@@ -43,6 +45,8 @@ const deviceService = createDeviceService(getFirestore());
 exports.adminSession = onCall(options, callable(administration.session));
 exports.adminOverview = onCall(options, callable(administration.overview));
 exports.adminChange = onCall(options, callable(administration.change));
+const deviceAccess = createDeviceAccess({db: getFirestore(), auth: getAuth()});
+exports.inviteDeviceUser = onCall(options, callable(deviceAccess.invite));
 const {createFirmwareHandler} = require("./firmware-http.cjs");
 exports.firmwareDevice = onRequest({...options, enforceAppCheck: undefined, cors: false},
   createFirmwareHandler(deviceService, getStorage().bucket("drawbridge-45487-firmware")));

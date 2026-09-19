@@ -5,6 +5,7 @@ const state = $("#user-state"), controls = $("#controls"), result = $("#result")
 const buttons = [...document.querySelectorAll("[data-duration]")];
 let gateway, user, busy = false, devices = [], generation = 0;
 let savingNickname = false;
+let inviting = false;
 let countdownTimer;
 const adminView = createAdminView({gateway: () => gateway, onClose: () => { controls.hidden = !user || !devices.length; }});
 $("#admin-open").onclick = async () => {
@@ -31,8 +32,15 @@ function closeNickname() {
   $("#nickname-form").hidden = true;
   $("#nickname-result").textContent = "";
 }
+function closeInvite() {
+  $("#invite-form").hidden = true;
+  $("#invite-email").value = "";
+  $("#invite-result").textContent = "";
+  $("#invite-share").hidden = true;
+}
 function closeAccountMenu() {
   closeNickname();
+  closeInvite();
   $("#account-dropdown").hidden = true;
   $("#account-menu-button").setAttribute("aria-expanded", "false");
 }
@@ -40,7 +48,7 @@ function toggleAccountMenu() {
   const open = $("#account-dropdown").hidden;
   $("#account-dropdown").hidden = !open;
   $("#account-menu-button").setAttribute("aria-expanded", String(open));
-  if (!open) closeNickname();
+  if (!open) { closeNickname(); closeInvite(); }
 }
 function activeHoldForSelectedGate() {
   return devices.find(device => device.id === $("#device").value)?.hold || null;
@@ -92,13 +100,18 @@ function render() {
   $("#offline").hidden = online;
   $("#connection").hidden = online && !busy && !!user;
   $("#connection").textContent = !online ? "Offline" : busy ? "Sending" : "Connecting";
-  const working = busy || savingNickname;
+  const working = busy || savingNickname || inviting;
   buttons.forEach(button => { button.disabled = !online || !user || working || !devices.length; });
   $("#device").disabled = working;
   $("#rename").disabled = !online || !user || working || !devices.length;
   $("#nickname").disabled = savingNickname;
   $("#nickname-save").disabled = !online || !user || working;
   $("#nickname-cancel").disabled = savingNickname;
+  $("#invite").disabled = !online || !user || working || !devices.length;
+  $("#invite-email").disabled = inviting;
+  $("#invite-save").disabled = !online || !user || working || !devices.length;
+  $("#invite-cancel").disabled = inviting;
+  $("#admin-open").disabled = working || !online;
   $("#sign-in").disabled = !online || !gateway;
   $("#account-menu-button").disabled = working;
   $("#sign-out").disabled = working;
@@ -108,6 +121,7 @@ function render() {
 }
 async function loadDevices() {
   closeNickname();
+  closeInvite();
   adminView.close();
   $("#admin-open").hidden = true;
   const current = ++generation;
@@ -140,10 +154,45 @@ async function loadDevices() {
 }
 $("#account-menu-button").onclick = toggleAccountMenu;
 $("#refresh").onclick = () => { closeAccountMenu(); loadDevices(); };
-$("#device").onchange = () => { closeNickname(); renderHold(); renderDeviceMetric(); };
+$("#device").onchange = () => { closeNickname(); closeInvite(); renderHold(); renderDeviceMetric(); };
+$("#invite").onclick = () => {
+  const device = devices.find(d => d.id === $("#device").value);
+  if (!device || inviting) return;
+  closeNickname(); closeInvite();
+  $("#invite-device").textContent = `Invite to ${device.name} (${device.id})`;
+  $("#invite-form").hidden = false;
+  $("#invite-email").focus();
+};
+$("#invite-cancel").onclick = () => { closeInvite(); $("#invite").focus(); };
+$("#invite-form").onsubmit = async event => {
+  event.preventDefault();
+  if (busy || savingNickname || inviting || !navigator.onLine || !user || !devices.length) return;
+  const deviceId = $("#device").value, email = $("#invite-email").value.trim();
+  const current = generation;
+  inviting = true;
+  $("#invite-result").textContent = "Granting access…";
+  $("#invite-share").hidden = true;
+  render();
+  try {
+    const response = await gateway.inviteDeviceUser({deviceId, email, requestId: crypto.randomUUID(), issuedAtMs: Date.now()});
+    if (current !== generation) return;
+    const message = `Access granted to ${response.email}.`;
+    $("#invite-result").textContent = message;
+    $("#invite-share").hidden = false;
+    result.textContent = message;
+  } catch (error) {
+    if (current !== generation) return;
+    const rejected = ["permission-denied", "unauthenticated", "invalid-argument", "failed-precondition", "not-found"]
+      .some(code => error.code === "functions/" + code);
+    const message = rejected ? error.message : "Couldn't confirm access. Try granting access again to the same email.";
+    $("#invite-result").textContent = message;
+    result.textContent = message;
+  } finally { inviting = false; render(); }
+};
 $("#rename").onclick = () => {
   const device = devices.find(d => d.id === $("#device").value);
   if (!device) return;
+  closeInvite();
   $("#nickname").value = device.name;
   $("#nickname-form").hidden = false;
   $("#nickname-result").textContent = "";
@@ -153,7 +202,7 @@ $("#rename").onclick = () => {
 $("#nickname-cancel").onclick = () => { closeNickname(); $("#rename").focus(); };
 $("#nickname-form").onsubmit = async event => {
   event.preventDefault();
-  if (busy || savingNickname || !navigator.onLine || !user || !devices.length) return;
+  if (busy || savingNickname || inviting || !navigator.onLine || !user || !devices.length) return;
   const deviceId = $("#device").value, nickname = $("#nickname").value.trim();
   if (!nickname) { $("#nickname-result").textContent = "Enter a nickname."; return; }
   const current = generation;
@@ -182,7 +231,7 @@ $("#sign-out").onclick = async () => {
   catch { result.textContent = "Couldn't sign out. Please try again."; }
 };
 buttons.forEach(button => { button.onclick = async () => {
-  if (busy || savingNickname || !navigator.onLine || !user || !devices.length) return;
+  if (busy || savingNickname || inviting || !navigator.onLine || !user || !devices.length) return;
   const durationSeconds = Number(button.dataset.duration);
   if (durationSeconds === 21600 && !window.confirm("Hold this gate open for 6 hours?")) return;
   const data = {deviceId: $("#device").value, durationSeconds, requestId: crypto.randomUUID(), issuedAtMs: Date.now()};
@@ -242,7 +291,7 @@ if ("serviceWorker" in navigator) {
     const offerUpdate = () => {
       if (!registration.waiting || !navigator.serviceWorker.controller) return;
       $("#update").hidden = false;
-      $("#update").onclick = () => { if (!busy && !savingNickname) { registration.waiting.postMessage("activate"); } };
+      $("#update").onclick = () => { if (!busy && !savingNickname && !inviting) { registration.waiting.postMessage("activate"); } };
     };
     offerUpdate();
     registration.addEventListener("updatefound", () => {

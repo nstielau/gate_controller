@@ -21,7 +21,7 @@ try {
       console.log("PASS: " + origin + " reaches Google sign-in with the accepted callback");
     } finally { await context.close(); }
   }
-  for (const name of ["listDevices", "holdGate", "renameGate", "adminSession", "adminOverview", "adminChange"]) {
+  for (const name of ["listDevices", "holdGate", "renameGate", "adminSession", "adminOverview", "adminChange", "inviteDeviceUser"]) {
     const response = await fetch("https://us-east1-drawbridge-45487.cloudfunctions.net/" + name, {
       method: "POST", headers: {"Content-Type": "application/json", Origin: canonical},
       body: JSON.stringify({data: {}}), signal: AbortSignal.timeout(30000)

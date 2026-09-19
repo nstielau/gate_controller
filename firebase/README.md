@@ -13,7 +13,9 @@ home screen for quick access.
 The favicon uses `web/drawbridge-castle-128.png`, matching the header artwork.
 Home-screen icons are checked-in exports in `web/icons/`; regenerate them with
 `node tools/export_castle_icons.mjs` (requires the Playwright Chromium browser
-installed by `make web-setup`). Regular builds only copy these files.
+installed by `make web-setup`). Regular builds only copy these files. The iPhone
+touch icon and ordinary install icons use enlarged artwork; Android gets a
+separate padded `castle-maskable-512.png` for safe cropping into other shapes.
 
 The centered loading indicator uses the original icon's pixels, with its bridge
 rotating about the doorway hinge and suspension chains following the free edge.
@@ -29,6 +31,15 @@ To name a gate, select it and tap **Edit nickname**, enter a name, then tap
 **Save nickname**. Names are shared with everyone assigned to that gate and
 persist across visits. Any assigned user can rename an enabled gate. Names
 must contain 1–80 characters; renaming does not send an MQTT command.
+
+To share a gate, select it, open the profile dropdown, and choose **Invite to
+device**. Enter the person's Google account email and select **Grant access**.
+Anyone with current access to an enabled gate can invite others to that gate.
+Invitees can control the gate and invite other people; this does not grant
+administrator access. No invitation email is sent: share
+https://drawbridge-45487.firebaseapp.com with them yourself. They must sign in
+with that verified Google account and use **Refresh access** if already signed in.
+An account is reserved if they have not signed in before.
 
 Only assigned users can control a gate. The browser receives gate IDs and
 display names, never MQTT credentials or arbitrary broker/topic parameters.
@@ -184,11 +195,35 @@ Change the display name in the app with **Edit nickname**, or in the Firestore
 console. The `renameGate` callable checks access transactionally and updates
 only `name`; it cannot change device IDs, topics, permissions, or enabled state.
 Access is by UID, not email.
+The `inviteDeviceUser` callable checks verified Google sign-in and App Check,
+then verifies the inviter's current device access, enabled state, and exact
+topic before looking up or reserving the recipient's Firebase Auth UID. It
+rechecks device access transactionally at the write and only updates
+`allowedUsers`, preserving existing users and gate configuration. It never
+publishes MQTT. Grants are audited in server-only `deviceAccessAudit` records
+with inviter, recipient, device, and time. Fresh request IDs deduplicate retries;
+replaying an already-completed request cannot restore subsequently revoked access.
+Administrators without device access cannot invite themselves through this API.
 Assign additional device IDs to different users with the same helper. This
 release supports multiple devices on the existing broker; additional brokers
 require server configuration and additional Secret Manager bindings.
 
 ### Secrets and deployment
+
+Before the first deployment with browser invitations, give the runtime service
+account a custom role containing only Auth user lookup and creation permissions.
+The [Firebase user-management API](https://firebase.google.com/docs/auth/admin/manage-users)
+reserves a UID without marking the address verified; the
+[Identity Platform IAM reference](https://docs.cloud.google.com/identity-platform/docs/access-control)
+lists the required permissions. This setup is separate from ordinary deployment:
+
+```sh
+gcloud iam roles create drawbridgeDeviceInviter --project=drawbridge-45487 --account=nick.stielau@gmail.com --title='Drawbridge device invitations' --permissions=firebaseauth.users.get,firebaseauth.users.create --stage=GA
+gcloud projects add-iam-policy-binding drawbridge-45487 --account=nick.stielau@gmail.com --member=serviceAccount:drawbridge-functions@drawbridge-45487.iam.gserviceaccount.com --role=projects/drawbridge-45487/roles/drawbridgeDeviceInviter --condition=None
+```
+
+If the custom role already exists, inspect its permissions before reusing it.
+Do not grant project Editor or broad Firebase Auth administration for invitations.
 
 ```sh
 make web-secrets
@@ -203,7 +238,8 @@ disable superseded versions after confirming the new deployment works.
 Runtime identity: `drawbridge-functions@drawbridge-45487.iam.gserviceaccount.com`.
 It needs `roles/datastore.user` on the project and Secret Accessor on the three
 MQTT secrets (the Firebase deploy command grants secret access). It does not
-need project Editor. Functions use 256 MiB, zero minimum instances, two maximum
+need project Editor. Browser invitations also require the custom Auth role above.
+Functions use 256 MiB, zero minimum instances, two maximum
 instances each, and a 30-second timeout. Function build images are cleaned up
 after seven days. Blaze billing is enabled; no paid minimum instances are used.
 
@@ -213,7 +249,12 @@ Automated coverage includes unauthenticated and non-Google rejection,
 unassigned/disabled/missing devices, topic tampering, every duration, stale
 requests, duplicate and concurrent requests, rate limiting, audit outcomes,
 TLS options, timeout/error cleanup, mobile layout, sign-out, and offline
-controls. The live MQTT smoke check verifies the real CA/credentials and
+controls. Invitation tests cover current device access (including revocation
+during Auth lookup), concurrent grants, account-creation races, duplicate
+requests, new/existing accounts, and mobile success/offline/error states.
+Firestore transactions use the local emulator; invitation Auth calls use a
+local fake. Actual Google sign-in to a reserved account and runtime IAM still
+require an interactive deployment check. The live MQTT smoke check verifies the real CA/credentials and
 three publish/receive cycles on a unique `web-test-...` device topic.
 
 Cached offline launch is automated in Chromium. The WebKit version of that

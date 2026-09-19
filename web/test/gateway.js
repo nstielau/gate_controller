@@ -7,6 +7,13 @@ export async function createGateway() {
   const devices = [{id: "test-device", name: "Garden gate"}, {id: "second-device", name: "Driveway"}];
   return {
     async adminSession() { return {isAdmin: scenario === "admin" || scenario === "admin-revoked"}; },
+    async inviteDeviceUser(data) {
+      window.__invitations ||= []; window.__invitations.push(data);
+      await new Promise(resolve => setTimeout(resolve, 250));
+      if (scenario === "invite-revoked") throw Object.assign(new Error("You cannot invite users to this device. Refresh access."), {code: "functions/permission-denied"});
+      if (scenario === "invite-failure") throw new Error("Network disconnected");
+      return {ok: true, email: data.email.toLowerCase(), deviceId: data.deviceId};
+    },
     async adminOverview() {
       if (scenario === "admin-revoked") throw new Error("revoked");
       window.__admins ||= [{email: "nick.stielau@gmail.com", owner: true}];

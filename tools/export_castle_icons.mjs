@@ -8,8 +8,13 @@ await mkdir(destination, {recursive: true});
 const browser = await chromium.launch();
 try {
   const page = await browser.newPage();
-  for (const size of [192, 512]) {
-    const encoded = await page.evaluate(async ({data, size}) => {
+  const icons = [
+    {name: "castle-192.png", size: 192, padding: .04},
+    {name: "castle-512.png", size: 512, padding: .04},
+    {name: "castle-maskable-512.png", size: 512, padding: .22}
+  ];
+  for (const {name, size, padding} of icons) {
+    const encoded = await page.evaluate(async ({data, size, padding}) => {
       const img = new Image();
       img.src = data;
       await img.decode();
@@ -19,12 +24,13 @@ try {
       context.fillStyle = "#f3f4eb";
       context.fillRect(0, 0, size, size);
       context.imageSmoothingEnabled = false;
-      // Keep the complete castle inside a maskable icon's central safe circle.
-      const inset = Math.round(size * .22);
+      // The artwork has its own transparent border. Use a small extra inset for
+      // iOS/ordinary icons; only the separate maskable icon needs a safe circle.
+      const inset = Math.round(size * padding);
       context.drawImage(img, inset, inset, size - 2 * inset, size - 2 * inset);
       return canvas.toDataURL("image/png").split(",")[1];
-    }, {data, size});
-    await writeFile(new URL(`castle-${size}.png`, destination), Buffer.from(encoded, "base64"));
+    }, {data, size, padding});
+    await writeFile(new URL(name, destination), Buffer.from(encoded, "base64"));
   }
 } finally { await browser.close(); }
-console.log("Exported castle home-screen icons at 192 and 512 pixels.");
+console.log("Exported larger 192/512 pixel home-screen icons and a separate maskable icon.");

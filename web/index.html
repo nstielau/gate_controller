@@ -25,6 +25,19 @@
         <div id="account-dropdown" class="account-dropdown" hidden role="menu">
           <button id="refresh" class="menu-action" role="menuitem" type="button">Refresh access</button>
           <button id="admin-open" class="menu-action" role="menuitem" type="button" hidden>Administration</button>
+          <button id="invite" class="menu-action" role="menuitem" type="button">Invite to device</button>
+          <form id="invite-form" hidden>
+            <p id="invite-device"></p>
+            <label for="invite-email">Google account email</label>
+            <input id="invite-email" type="email" required maxlength="254" autocomplete="email" aria-describedby="invite-hint">
+            <p id="invite-hint" class="hint">They can control this gate and invite others. Share the app link with them afterward; no email is sent.</p>
+            <div class="account-actions">
+              <button id="invite-save" type="submit">Grant access</button>
+              <button id="invite-cancel" type="button" class="quiet">Cancel</button>
+            </div>
+            <p id="invite-result" role="status"></p>
+            <p id="invite-share" class="hint" hidden>Ask them to sign in with this Google account at <a href="https://drawbridge-45487.firebaseapp.com">drawbridge-45487.firebaseapp.com</a>, then refresh access.</p>
+          </form>
           <button id="rename" class="menu-action" role="menuitem" type="button">Edit nickname</button>
           <form id="nickname-form" hidden>
             <label for="nickname">Gate nickname</label>
