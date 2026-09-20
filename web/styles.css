@@ -5,6 +5,8 @@ body { margin: 0; }
 main { max-width: 30rem; min-height: 100dvh; margin: auto; padding: max(1rem, env(safe-area-inset-top)) 1.25rem max(1rem, env(safe-area-inset-bottom)); }
 header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
 main:not(.authenticated) > header { display: none; }
+/* Reserve the header row while connecting so authentication cannot move the loader. */
+main:not(.authenticated):has(#loading-state:not([hidden])) > header { display: flex; visibility: hidden; }
 .signed-out-hero { min-height: calc(100dvh - 2rem); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
 .castle-hero { width: min(13rem, 55vw); height: min(13rem, 55vw); object-fit: contain; image-rendering: pixelated; }
 .signed-out-hero h1 { margin: 1.25rem 0 0; font-size: 1.2rem; letter-spacing: .2em; }

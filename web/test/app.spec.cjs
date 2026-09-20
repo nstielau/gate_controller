@@ -56,8 +56,17 @@ test("centered drawbridge loader animates while securely connecting and loading 
       && document.documentElement.scrollHeight <= innerHeight;
   });
   expect(aligned).toBe(true);
+  const connectingIcon = await icon.boundingBox();
+  const connectingMessage = await page.locator("#loading-message").boundingBox();
+  await expect(page.locator("header")).toBeHidden();
   await page.evaluate(() => window.__releaseGateway());
   await expect(page.locator("#loading-message")).toHaveText("Loading devices");
+  await expect(page.locator("header")).toBeVisible();
+  const loadingIcon = await icon.boundingBox();
+  const loadingMessage = await page.locator("#loading-message").boundingBox();
+  expect(Math.abs(loadingIcon.y - connectingIcon.y)).toBeLessThan(1);
+  expect(Math.abs(loadingIcon.x - connectingIcon.x)).toBeLessThan(1);
+  expect(Math.abs(loadingMessage.y - connectingMessage.y)).toBeLessThan(1);
   await expect(page.locator(".drawbridge-loader")).toBeVisible();
   await expect(loader).toBeInViewport();
   await page.evaluate(() => window.__releaseDevices());
