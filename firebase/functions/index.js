@@ -1,4 +1,4 @@
-const {onCall, HttpsError} = require("firebase-functions/v2/https");
+const {onCall, onRequest, HttpsError} = require("firebase-functions/v2/https");
 const {defineSecret} = require("firebase-functions/params");
 const {initializeApp} = require("firebase-admin/app");
 const {getFirestore} = require("firebase-admin/firestore");
@@ -52,7 +52,6 @@ exports.createDeviceClaim = onCall(options, callable(enrollment.claim));
 exports.deviceClaimStatus = onCall(options, callable(enrollment.status));
 exports.deviceRegister = onRequest({...options, enforceAppCheck: undefined, secrets: [emqxApiUrl, emqxAppId, emqxAppSecret]}, createRegistrationHandler(enrollment));
 
-const {onRequest} = require("firebase-functions/v2/https");
 const {getStorage} = require("firebase-admin/storage");
 const {createAdministration, createDeviceService} = require("./administration.cjs");
 const administration = createAdministration(getFirestore());
