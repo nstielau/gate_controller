@@ -4,6 +4,8 @@ const {initializeApp} = require("firebase-admin/app");
 const {getFirestore} = require("firebase-admin/firestore");
 const {getAuth} = require("firebase-admin/auth");
 const {createDeviceAccess} = require("./device-access.cjs");
+const {createEnrollment, createRegistrationHandler} = require("./enrollment.cjs");
+const {createEmqxClient} = require("./emqx.cjs");
 const {createController} = require("./controller.cjs");
 const {createStore} = require("./store.cjs");
 const {publishHold} = require("./mqtt.cjs");
@@ -11,6 +13,9 @@ initializeApp();
 const username = defineSecret("MQTT_USERNAME");
 const password = defineSecret("MQTT_PASSWORD");
 const ca = defineSecret("MQTT_CA_PEM");
+const emqxApiUrl = defineSecret("EMQX_API_URL");
+const emqxAppId = defineSecret("EMQX_APP_ID");
+const emqxAppSecret = defineSecret("EMQX_APP_SECRET");
 const controller = createController({
   store: createStore(getFirestore()),
   publish: (topic, payload) => publishHold(topic, payload, {
@@ -36,6 +41,16 @@ function callable(handler) {
 exports.listDevices = onCall(options, callable(controller.listDevices));
 exports.renameGate = onCall(options, callable(controller.renameGate));
 exports.holdGate = onCall({...options, secrets: [username, password, ca]}, callable(controller.holdGate));
+const enrollment = createEnrollment({
+  db: getFirestore(),
+  broker: {
+    provision: value => createEmqxClient({baseUrl: emqxApiUrl.value(), appId: emqxAppId.value(), appSecret: emqxAppSecret.value()}).provision(value),
+    remove: usernameValue => createEmqxClient({baseUrl: emqxApiUrl.value(), appId: emqxAppId.value(), appSecret: emqxAppSecret.value()}).remove(usernameValue),
+  },
+});
+exports.createDeviceClaim = onCall(options, callable(enrollment.claim));
+exports.deviceClaimStatus = onCall(options, callable(enrollment.status));
+exports.deviceRegister = onRequest({...options, enforceAppCheck: undefined, secrets: [emqxApiUrl, emqxAppId, emqxAppSecret]}, createRegistrationHandler(enrollment));
 
 const {onRequest} = require("firebase-functions/v2/https");
 const {getStorage} = require("firebase-admin/storage");
