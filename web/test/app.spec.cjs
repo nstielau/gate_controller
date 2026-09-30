@@ -405,3 +405,9 @@ test("add-device menu opens onboarding and expired claims stop polling", async (
   await expect(page.locator("#device-claim")).toBeEnabled();
   expect(await page.evaluate(() => window.__claimPolls)).toBe(1);
 });
+
+test("QR registration links prefill the device ID", async ({page}) => {
+  await page.addInitScript(() => { window.__scenario = "claim-expired"; });
+  await page.goto("/?device_id=AB12CD");
+  await expect(page.locator("#device-onboarding-id")).toHaveValue("ab12cd");
+});
