@@ -6,6 +6,8 @@ const buttons = [...document.querySelectorAll("[data-duration]")];
 let gateway, user, busy = false, devices = [], generation = 0;
 let savingNickname = false;
 let inviting = false;
+let claiming = false;
+let claimTimer;
 let countdownTimer;
 const adminView = createAdminView({gateway: () => gateway, onClose: () => { controls.hidden = !user || !devices.length; }});
 $("#admin-open").onclick = async () => {
@@ -37,6 +39,48 @@ function closeInvite() {
   $("#invite-email").value = "";
   $("#invite-result").textContent = "";
   $("#invite-share").hidden = true;
+}
+function stopClaimPolling() {
+  clearInterval(claimTimer);
+  claimTimer = undefined;
+}
+function closeOnboarding() {
+  stopClaimPolling();
+  $("#device-onboarding").hidden = true;
+  $("#device-onboarding-status").textContent = "Enter the device ID to start.";
+}
+function openOnboarding(focus = true) {
+  closeNickname();
+  closeInvite();
+  adminView.close();
+  controls.hidden = true;
+  $("#admin-view").hidden = true;
+  $("#device-onboarding").hidden = false;
+  if (focus) $("#device-onboarding-id").focus();
+}
+function claimStatusMessage(status) {
+  if (status.state === "pending") return "Waiting for the device to register…";
+  if (status.state === "registered") return "Device registered. Loading access…";
+  if (status.state === "expired") return "This claim expired. Start registration again.";
+  return "No active claim found. Start registration again.";
+}
+async function pollClaim(deviceId, current) {
+  try {
+    const status = await gateway.deviceClaimStatus({deviceId});
+    if (current !== generation || $("#device-onboarding").hidden) return;
+    $("#device-onboarding-status").textContent = claimStatusMessage(status);
+    if (status.state === "registered") {
+      stopClaimPolling();
+      claiming = false;
+      await loadDevices();
+    } else if (status.state !== "pending") {
+      stopClaimPolling();
+      claiming = false;
+      render();
+    }
+  } catch {
+    if (current === generation) $("#device-onboarding-status").textContent = "Couldn't check registration. We'll keep trying.";
+  }
 }
 function closeAccountMenu() {
   closeNickname();
@@ -100,7 +144,7 @@ function render() {
   $("#offline").hidden = online;
   $("#connection").hidden = online && !busy && !!user;
   $("#connection").textContent = !online ? "Offline" : busy ? "Sending" : "Connecting";
-  const working = busy || savingNickname || inviting;
+  const working = busy || savingNickname || inviting || claiming;
   buttons.forEach(button => { button.disabled = !online || !user || working || !devices.length; });
   $("#device").disabled = working;
   $("#rename").disabled = !online || !user || working || !devices.length;
@@ -116,12 +160,16 @@ function render() {
   $("#account-menu-button").disabled = working;
   $("#sign-out").disabled = working;
   $("#refresh").disabled = working || !online;
+  $("#add-device").disabled = working || !online;
+  $("#device-claim").disabled = claiming || !online || !user;
+  $("#device-onboarding-id").disabled = claiming;
   $("#update").disabled = working;
   renderHold();
 }
 async function loadDevices() {
   closeNickname();
   closeInvite();
+  stopClaimPolling();
   adminView.close();
   $("#admin-open").hidden = true;
   const current = ++generation;
@@ -143,7 +191,9 @@ async function loadDevices() {
     if (devices.some(device => device.id === previousId)) $("#device").value = previousId;
     controls.hidden = devices.length === 0;
     state.hidden = devices.length > 0;
-    state.textContent = devices.length ? "" : "No gate access yet. Ask the administrator to add " + user.email + ".";
+    state.textContent = devices.length ? "" : "No gate access yet. Add a device or ask the administrator to add " + user.email + ".";
+    if (devices.length) closeOnboarding();
+    else openOnboarding(false);
   } catch (error) {
     if (current !== generation) return;
     state.hidden = false;
@@ -154,7 +204,34 @@ async function loadDevices() {
 }
 $("#account-menu-button").onclick = toggleAccountMenu;
 $("#refresh").onclick = () => { closeAccountMenu(); loadDevices(); };
+$("#add-device").onclick = () => { closeAccountMenu(); openOnboarding(); };
 $("#device").onchange = () => { closeNickname(); closeInvite(); renderHold(); renderDeviceMetric(); };
+$("#device-onboarding-form").onsubmit = async event => {
+  event.preventDefault();
+  if (claiming || !navigator.onLine || !user) return;
+  const deviceId = $("#device-onboarding-id").value.trim().toLowerCase();
+  if (!/^[a-z0-9-]{1,64}$/.test(deviceId)) {
+    $("#device-onboarding-status").textContent = "Use lowercase letters, numbers, and hyphens only.";
+    return;
+  }
+  claiming = true;
+  const current = generation;
+  $("#device-onboarding-status").textContent = "Starting registration…";
+  render();
+  try {
+    await gateway.createDeviceClaim({deviceId});
+    if (current !== generation) return;
+    $("#device-onboarding-status").textContent = "Waiting for the device to register…";
+    await pollClaim(deviceId, current);
+    if (claiming) claimTimer = setInterval(() => pollClaim(deviceId, current), 3000);
+  } catch (error) {
+    claiming = false;
+    const rejected = ["permission-denied", "unauthenticated", "invalid-argument", "failed-precondition"]
+      .some(code => error.code === "functions/" + code);
+    $("#device-onboarding-status").textContent = rejected ? error.message : "Couldn't start registration. Try again.";
+    render();
+  }
+};
 $("#invite").onclick = () => {
   const device = devices.find(d => d.id === $("#device").value);
   if (!device || inviting) return;
@@ -267,7 +344,7 @@ try {
     $("#signed-out-hero").hidden = !!user;
     $("#account-menu-button").hidden = !user;
     if (!user) closeAccountMenu();
-    if (!user) { ++generation; devices = []; controls.hidden = true; hideLoading(); state.hidden = false; state.textContent = "Sign in to control your gate."; render(); }
+    if (!user) { ++generation; devices = []; claiming = false; closeOnboarding(); controls.hidden = true; hideLoading(); state.hidden = false; state.textContent = "Sign in to control your gate."; render(); }
     else loadDevices();
   });
   render();

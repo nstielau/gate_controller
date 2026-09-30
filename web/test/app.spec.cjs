@@ -375,3 +375,33 @@ test("firmware shows independently reported base and app versions, including leg
   await page.getByRole("button", {name: "Refresh administration"}).click();
   await expect(page.locator("#admin-devices")).toContainText("App 1.0.9 · Base not reported");
 });
+
+test("first login can claim a device and polling loads access when registration completes", async ({page}) => {
+  await page.addInitScript(() => { window.__scenario = "claim-success"; });
+  await page.goto("/");
+  await expect(page.locator("#device-onboarding")).toBeVisible();
+  await expect(page.locator("#device-onboarding-status")).toHaveText(/enter the device ID/i);
+  await page.locator("#device-onboarding-id").fill(" AB12CD ");
+  await page.locator("#device-claim").click();
+  await expect(page.locator("#device-claim")).toBeDisabled();
+  await expect(page.locator("#device-onboarding-status")).toHaveText(/waiting/i);
+  await expect(page.locator("#controls")).toBeVisible({timeout: 5000});
+  expect(await page.evaluate(() => window.__claims)).toEqual([{deviceId: "ab12cd"}]);
+  expect(await page.evaluate(() => window.__commands || [])).toEqual([]);
+});
+
+test("add-device menu opens onboarding and expired claims stop polling", async ({page}) => {
+  await page.addInitScript(() => { window.__scenario = "claim-expired"; });
+  await page.goto("/");
+  await page.locator("#account-menu-button").click();
+  await page.locator("#add-device").click();
+  await expect(page.locator("#device-onboarding")).toBeVisible();
+  await page.locator("#device-onboarding-id").fill("bad id");
+  await page.locator("#device-claim").click();
+  await expect(page.locator("#device-onboarding-status")).toHaveText(/lowercase letters/i);
+  await page.locator("#device-onboarding-id").fill("ab12cd");
+  await page.locator("#device-claim").click();
+  await expect(page.locator("#device-onboarding-status")).toHaveText(/expired/i);
+  await expect(page.locator("#device-claim")).toBeEnabled();
+  expect(await page.evaluate(() => window.__claimPolls)).toBe(1);
+});

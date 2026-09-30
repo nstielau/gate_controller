@@ -24,6 +24,7 @@
         </button>
         <div id="account-dropdown" class="account-dropdown" hidden role="menu">
           <button id="refresh" class="menu-action" role="menuitem" type="button">Refresh access</button>
+          <button id="add-device" class="menu-action" role="menuitem" type="button">Add device</button>
           <button id="admin-open" class="menu-action" role="menuitem" type="button" hidden>Administration</button>
           <button id="invite" class="menu-action" role="menuitem" type="button">Invite to device</button>
           <form id="invite-form" hidden>
@@ -70,6 +71,17 @@
     <p id="loading-message">Securely Connecting</p>
   </section>
   <p id="user-state" hidden></p>
+  <section id="device-onboarding" hidden aria-labelledby="device-onboarding-heading">
+    <h2 id="device-onboarding-heading">Add a device</h2>
+    <p class="hint">Enter the device ID shown on its setup screen.</p>
+    <form id="device-onboarding-form">
+      <label for="device-onboarding-id">Device ID</label>
+      <input id="device-onboarding-id" name="deviceId" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" required aria-describedby="device-onboarding-hint">
+      <p id="device-onboarding-hint" class="hint">Use lowercase letters, numbers, and hyphens.</p>
+      <button id="device-claim" type="submit">Start registration</button>
+    </form>
+    <p id="device-onboarding-status" role="status" aria-live="polite">Enter the device ID to start.</p>
+  </section>
   <section id="controls" hidden aria-labelledby="hold-heading">
     <label for="device">Your gate</label><select id="device"></select>
     <p id="device-metric" class="hint device-metric"></p>

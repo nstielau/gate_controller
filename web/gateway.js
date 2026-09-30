@@ -20,6 +20,8 @@ export async function createGateway() {
   const list = httpsCallable(functions, "listDevices", {timeout: 30000});
   const hold = httpsCallable(functions, "holdGate", {timeout: 30000});
   const rename = httpsCallable(functions, "renameGate", {timeout: 30000});
+  const createDeviceClaim = httpsCallable(functions, "createDeviceClaim", {timeout: 30000});
+  const deviceClaimStatus = httpsCallable(functions, "deviceClaimStatus", {timeout: 30000});
   return {
     adminSession: async () => (await httpsCallable(functions, "adminSession")({})).data,
     adminOverview: async () => (await httpsCallable(functions, "adminOverview")({})).data,
@@ -30,6 +32,8 @@ export async function createGateway() {
     signOut: () => signOut(auth),
     listDevices: async () => (await list({})).data,
     holdGate: async data => (await hold(data)).data,
-    renameGate: async data => (await rename(data)).data
+    renameGate: async data => (await rename(data)).data,
+    createDeviceClaim: async data => (await createDeviceClaim(data)).data,
+    deviceClaimStatus: async data => (await deviceClaimStatus(data)).data
   };
 }

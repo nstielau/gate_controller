@@ -4,8 +4,24 @@ export async function createGateway() {
   if (scenario === "loading") await new Promise(resolve => { window.__releaseGateway = resolve; });
   if (scenario === "startup-failure") throw new Error("Gateway initialization failed");
   let callback;
-  const devices = [{id: "test-device", name: "Garden gate"}, {id: "second-device", name: "Driveway"}];
+  let claimPolls = 0;
+  let devices = ["claim-success", "claim-expired"].includes(scenario)
+    ? [] : [{id: "test-device", name: "Garden gate"}, {id: "second-device", name: "Driveway"}];
   return {
+    async createDeviceClaim(data) {
+      window.__claims ||= []; window.__claims.push({deviceId: data.deviceId.trim().toLowerCase()});
+      return {deviceId: data.deviceId.trim().toLowerCase(), state: "pending", expiresAtMs: Date.now() + 7200000};
+    },
+    async deviceClaimStatus(data) {
+      claimPolls++;
+      window.__claimPolls = claimPolls;
+      if (scenario === "claim-expired") return {deviceId: data.deviceId, state: "expired", expiresAtMs: Date.now() - 1};
+      if (scenario === "claim-success" && claimPolls >= 2) {
+        if (!devices.some(device => device.id === data.deviceId)) devices.push({id: data.deviceId, name: data.deviceId});
+        return {deviceId: data.deviceId, state: "registered"};
+      }
+      return {deviceId: data.deviceId, state: "pending", expiresAtMs: Date.now() + 7200000};
+    },
     async adminSession() { return {isAdmin: scenario === "admin" || scenario === "admin-revoked"}; },
     async inviteDeviceUser(data) {
       window.__invitations ||= []; window.__invitations.push(data);
