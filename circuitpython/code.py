@@ -18,10 +18,17 @@ import adafruit_minimqtt.adafruit_minimqtt as MQTT
 import board
 import digitalio
 import supervisor
+
+try:
+    import adafruit_requests
+except ImportError:
+    adafruit_requests = None
 from gate_mqtt import GateMQTT, NETWORK_SECONDS
 from drawbridge import Indicators, create_app, APP_VERSION
 from gate_hold import HoldState
 from gate_base import BASE_VERSION
+from device_enrollment import apply_registration, registration_payload, visible_networks
+from device_display import ReverseTFT
 
 
 CONFIG_SIZE = min(512, len(microcontroller.nvm))
@@ -32,6 +39,7 @@ OLD_CONFIG_SIZE = 192
 MQTT_BROKER = "jd3a6164.ala.us-east-1.emqxsl.com"
 MQTT_PORT = 8883
 EMQX_CA_FILE = "/certs/emqxsl-ca.crt"
+REGISTRATION_ENDPOINT = "https://us-east1-drawbridge-45487.cloudfunctions.net/deviceRegister"
 BOOT_ID = "".join("{:02x}".format(value) for value in os.urandom(6))
 
 TRANSISTOR_CONTROL_PIN = board.D10
@@ -60,6 +68,9 @@ ota_next_check = 0
 ota_backoff = 60
 ota_state = "disabled"
 watchdog_timer = None
+display = None
+display_onboarding = False
+display_last_status = None
 
 
 class Platform:
@@ -303,7 +314,12 @@ def add_settings_credentials(config):
     result = dict(config)
     username = os.getenv("MQTT_USERNAME")
     password = os.getenv("MQTT_PASSWORD")
-    if username and password:
+    if (
+        username
+        and password
+        and not result.get("registration_pending")
+        and not result.get("registration_complete")
+    ):
         result["mqtt_username"] = username
         result["mqtt_password"] = password
         result.setdefault("mqtt_topic", default_topic("status"))
@@ -354,29 +370,58 @@ def parse_form(body):
     return fields
 
 
-def page(message=""):
+def html_escape(value):
+    return (
+        str(value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def scan_networks():
+    """Scan only visible open/WPA networks for the local setup portal."""
+    try:
+        entries = wifi.radio.start_scanning_networks()
+        networks = visible_networks(entries)[:20]
+        wifi.radio.stop_scanning_networks()
+        return networks
+    except (AttributeError, OSError, RuntimeError):
+        try:
+            wifi.radio.stop_scanning_networks()
+        except (AttributeError, OSError, RuntimeError):
+            pass
+        return []
+
+
+def page(message="", networks=None):
+    options = ['<option value="">Choose a nearby network</option>']
+    for network in networks or []:
+        label = "{} ({}, {} dBm)".format(
+            network["ssid"], network["security"].upper(), network["rssi"]
+        )
+        options.append(
+            '<option value="{}">{}</option>'.format(
+                html_escape(network["ssid"]), html_escape(label)
+            )
+        )
+    network_options = "".join(options)
     return """<!doctype html>
 <html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
 <title>Gate controller setup</title>
 <style>body{{font:17px sans-serif;max-width:34rem;margin:3rem auto;padding:0 1rem}}input{{box-sizing:border-box;width:100%;padding:.7rem;margin:.3rem 0 1rem}}button{{padding:.7rem 1rem}}small{{display:block;margin-top:-.7rem;margin-bottom:1rem}}</style>
 </head><body><h1>Gate controller setup</h1><p>{message}</p>
 <form action=\"/configure\" method=\"post\"><h2>Wi-Fi</h2>
-<label>Network name (SSID)</label><input name=\"ssid\" maxlength=\"32\" autofocus>
+<label for=\"ssid\">Nearby open/WPA networks</label><select id=\"ssid\" name=\"ssid\">{network_options}</select>
+<button type=\"submit\" formaction=\"/scan\" formmethod=\"get\">Refresh networks</button>
+<label for=\"ssid-manual\">Hidden network name</label><input id=\"ssid-manual\" name=\"ssid_manual\" maxlength=\"32\" autofocus>
 <small>Leave Wi-Fi fields blank to keep the saved network.</small>
 <label>Wi-Fi password</label><input name=\"password\" type=\"password\" maxlength=\"63\">
-<h2>EMQX MQTT</h2><p>Broker: <code>{broker}:{port}</code></p>
-<label>MQTT username</label><input name=\"mqtt_username\" maxlength=\"96\" required>
-<label>MQTT password</label><input name=\"mqtt_password\" type=\"password\" maxlength=\"128\" required>
-<label>Status topic</label><input name=\"mqtt_topic\" maxlength=\"128\" value=\"{status_topic}\" required>
-<small>The controller publishes retained status to this topic.</small>
-<label>Command topic</label><input name=\"mqtt_command_topic\" maxlength=\"128\" value=\"{command_topic}\" required>
-<small>Publish JSON blink commands here.</small>
+<h2>Registration</h2><p>Save Wi-Fi first. The device will show a QR code and wait for you to register it in Drawbridge. MQTT credentials are created automatically.</p>
 <button type=\"submit\">Save and connect</button></form></body></html>""".format(
         message=message,
-        broker=MQTT_BROKER,
-        port=MQTT_PORT,
-        status_topic=default_topic("status"),
-        command_topic=default_topic("command"),
+        network_options=network_options,
     )
 
 
@@ -392,7 +437,7 @@ def send_response(client, body, status="200 OK"):
 
 def config_from_form(fields):
     previous = load_config() or {}
-    submitted_ssid = fields.get("ssid", "").strip()
+    submitted_ssid = fields.get("ssid_manual", "").strip() or fields.get("ssid", "").strip()
     submitted_password = fields.get("password", "")
     ssid = submitted_ssid or previous.get("ssid", "")
     password = (
@@ -405,26 +450,37 @@ def config_from_form(fields):
     if password and not 8 <= len(password) <= 63:
         raise ValueError("Wi-Fi passwords must be 8 to 63 characters.")
 
-    username = fields.get("mqtt_username", "").strip()
-    mqtt_password = fields.get("mqtt_password", "")
-    topic = fields.get("mqtt_topic", "").strip()
-    command_topic = fields.get("mqtt_command_topic", "").strip()
-    if not username or not mqtt_password:
-        raise ValueError("Enter the MQTT username and password.")
-    if not topic:
-        raise ValueError("Enter an MQTT status topic.")
-    if not command_topic:
-        raise ValueError("Enter an MQTT command topic.")
-    if topic == command_topic or any(c in topic + command_topic for c in "#+\x00"):
-        raise ValueError("Use distinct MQTT topics without wildcards.")
-    return {
+    result = {
         "ssid": ssid,
         "password": password,
-        "mqtt_username": username,
-        "mqtt_password": mqtt_password,
-        "mqtt_topic": topic,
-        "mqtt_command_topic": command_topic,
     }
+    username = fields.get("mqtt_username", "").strip()
+    mqtt_password = fields.get("mqtt_password", "")
+    if username and mqtt_password:
+        topic = fields.get("mqtt_topic", "").strip()
+        command_topic = fields.get("mqtt_command_topic", "").strip()
+        if (
+            not topic
+            or not command_topic
+            or topic == command_topic
+            or any(c in topic + command_topic for c in "#+\x00")
+        ):
+            raise ValueError("Use distinct MQTT topics without wildcards.")
+        result.update(
+            mqtt_username=username,
+            mqtt_password=mqtt_password,
+            mqtt_topic=topic,
+            mqtt_command_topic=command_topic,
+        )
+        result["registration_pending"] = False
+    else:
+        for key in ("mqtt_username", "mqtt_password", "mqtt_topic", "mqtt_command_topic"):
+            if key in previous:
+                result[key] = previous[key]
+        if previous.get("registration_complete"):
+            result["registration_complete"] = True
+        result["registration_pending"] = not mqtt_ready(result)
+    return result
 
 
 def read_http_request(client):
@@ -479,8 +535,10 @@ def service_http(server):
             )
             time.sleep(1)
             supervisor.reload()
+        elif len(request_line) >= 2 and request_line[0] == b"GET" and request_line[1] == b"/scan":
+            send_response(client, page("Networks refreshed.", scan_networks()))
         else:
-            send_response(client, page())
+            send_response(client, page(networks=scan_networks()))
     except (OSError, UnicodeError, ValueError):
         try:
             send_response(client, page("Please check the fields and try again."), "400 Bad Request")
@@ -537,6 +595,53 @@ def mqtt_ready(config):
     )
 
 
+def registration_request(pool, config):
+    """Ask Firebase for credentials; a 400 means the user has not claimed it."""
+    if adafruit_requests is None:
+        raise RuntimeError("registration_http_unavailable")
+    ssl_context = ssl.create_default_context()
+    with open("/certs/google-roots.pem", "r") as certificate_file:
+        ssl_context.load_verify_locations(cadata=certificate_file.read())
+    session = adafruit_requests.Session(pool, ssl_context)
+    response = None
+    try:
+        response = session.post(REGISTRATION_ENDPOINT, json=registration_payload(device_suffix()))
+        if response.status_code == 400:
+            return None
+        if response.status_code != 200:
+            raise OSError("registration_http_{}".format(response.status_code))
+        return apply_registration(config, response.json())
+    finally:
+        if response is not None:
+            response.close()
+
+
+def run_registration(pool, config):
+    """Keep the QR screen up until the active web claim provisions MQTT."""
+    global display_onboarding
+    display_onboarding = True
+    if display is not None:
+        display.show_qr()
+    next_attempt = 0
+    while True:
+        now = time.monotonic()
+        if now < next_attempt:
+            time.sleep(0.1)
+            continue
+        try:
+            if not wifi.radio.connected:
+                wifi.radio.connect(config["ssid"], config.get("password", ""), timeout=12)
+            registered = registration_request(pool, config)
+            if registered is not None:
+                save_config(registered)
+                display_onboarding = False
+                return registered
+            next_attempt = time.monotonic() + 3
+        except (OSError, RuntimeError, ValueError) as error:
+            log_event("registration_wait", error=str(error))
+            next_attempt = time.monotonic() + 5
+
+
 def log_event(event, **fields):
     fields.update(event=event, boot_id=BOOT_ID, uptime_ms=int(time.monotonic() * 1000))
     print("GATE_LOG " + json.dumps(fields))
@@ -583,10 +688,15 @@ def on_mqtt_message(client, topic, message):
 
 
 def service_outputs(runtime, online):
+    global display_last_status
     now = time.monotonic()
     active = hold.active(now)
     gate_output.value = active
     service_status_led(bool(wifi.radio.connected), online, active, now)
+    status = (bool(wifi.radio.connected), bool(online), bool(active))
+    if display is not None and not display_onboarding and status != display_last_status:
+        display.show_status(wifi=status[0], mqtt=status[1], hold=status[2])
+        display_last_status = status
 
 
 def connect_mqtt(pool, config, runtime):
@@ -715,10 +825,12 @@ def run_configured_controller(pool, config):
 
 
 def main():
-    global gate_output, hold_led, wifi_led, mqtt_led
+    global gate_output, hold_led, wifi_led, mqtt_led, display
     log_event("boot", reset_reason=str(microcontroller.cpu.reset_reason))
     outputs = []
     try:
+        display = ReverseTFT.from_board(device_suffix().lower())
+        display.show_boot()
         for pin in (
             TRANSISTOR_CONTROL_PIN,
             WIFI_INDICATOR_PIN,
@@ -739,6 +851,11 @@ def main():
         service_outputs(None, online=False)
         if config and mqtt_ready(config):
             pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
+            run_configured_controller(pool, config)
+        elif config and config.get("ssid"):
+            log_event("registration")
+            pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
+            config = run_registration(pool, config)
             run_configured_controller(pool, config)
         else:
             log_event("provisioning")

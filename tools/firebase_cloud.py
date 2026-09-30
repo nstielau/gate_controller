@@ -67,7 +67,9 @@ class Cloud:
 
     def secrets(self):
         env = load_dotenv(ROOT / ".env")
-        values = {name: env.get(name, "") for name in ("MQTT_USERNAME", "MQTT_PASSWORD")}
+        values = {name: env.get(name, "") for name in (
+            "MQTT_USERNAME", "MQTT_PASSWORD", "EMQX_API_URL", "EMQX_APP_ID", "EMQX_APP_SECRET"
+        )}
         values["MQTT_CA_PEM"] = (ROOT / "emqxsl-ca.crt").read_text()
         if not all(values.values()) or "BEGIN CERTIFICATE" not in values["MQTT_CA_PEM"]:
             raise ValueError("Missing MQTT credentials or CA")

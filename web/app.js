@@ -2,6 +2,7 @@ import {createAdminView} from "./admin.js";
 import {createGateway} from "./gateway.js";
 const $ = selector => document.querySelector(selector);
 const state = $("#user-state"), controls = $("#controls"), result = $("#result");
+const scannedDeviceId = new URL(location.href).searchParams.get("device_id")?.trim().toLowerCase() || "";
 const buttons = [...document.querySelectorAll("[data-duration]")];
 let gateway, user, busy = false, devices = [], generation = 0;
 let savingNickname = false;
@@ -56,6 +57,9 @@ function openOnboarding(focus = true) {
   controls.hidden = true;
   $("#admin-view").hidden = true;
   $("#device-onboarding").hidden = false;
+  if (/^[a-z0-9-]{1,64}$/.test(scannedDeviceId) && !$("#device-onboarding-id").value) {
+    $("#device-onboarding-id").value = scannedDeviceId;
+  }
   if (focus) $("#device-onboarding-id").focus();
 }
 function claimStatusMessage(status) {

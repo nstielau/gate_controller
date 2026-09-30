@@ -82,19 +82,23 @@ function createEnrollment({db, broker, now = Date.now, randomBytes = cryptoRando
       });
       fail("unavailable", "Device registration is temporarily unavailable. Try again.");
     }
-    await db.runTransaction(async tx => {
-      const [claimDoc, deviceDoc] = await tx.getAll(claimRef(id), deviceRef(id));
-      if (!claimDoc.exists || claimDoc.data().attemptId !== attemptId || deviceDoc.exists) {
-        try { await broker.remove(username); } catch {}
-        fail("failed-precondition", "This device registration is no longer available.");
-      }
-      tx.set(deviceRef(id), {
-        id, name: id, enabled: true, allowedUsers: [owner],
-        commandTopic, statusTopic, mqttUsername: username, credentialVersion: 1,
-        registeredAtMs: now(), holdCount: 0, activeHold: null, pendingCommandId: null,
+    try {
+      await db.runTransaction(async tx => {
+        const [claimDoc, deviceDoc] = await tx.getAll(claimRef(id), deviceRef(id));
+        if (!claimDoc.exists || claimDoc.data().attemptId !== attemptId || deviceDoc.exists) {
+          fail("failed-precondition", "This device registration is no longer available.");
+        }
+        tx.set(deviceRef(id), {
+          id, name: id, enabled: true, allowedUsers: [owner],
+          commandTopic, statusTopic, mqttUsername: username, credentialVersion: 1,
+          registeredAtMs: now(), holdCount: 0, activeHold: null, pendingCommandId: null,
+        });
+        tx.update(claimRef(id), {state: "registered", registeredAtMs: now(), attemptId: null, provisioningAtMs: null});
       });
-      tx.update(claimRef(id), {state: "registered", registeredAtMs: now(), attemptId: null, provisioningAtMs: null});
-    });
+    } catch (error) {
+      try { await broker.remove(username); } catch {}
+      throw error;
+    }
     return {deviceId: id, username, password, brokerHost, brokerPort, commandTopic, statusTopic};
   }
   return {claim, status, register, normalizeDeviceId};

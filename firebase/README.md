@@ -230,14 +230,15 @@ make web-secrets
 make web-deploy
 ```
 
-The secret helper reads `MQTT_USERNAME` and `MQTT_PASSWORD` from ignored `.env`
-and PEM data from ignored `emqxsl-ca.crt`. It uploads only changed values, without
-printing them. Redeploy functions after rotation. Old secret versions remain;
+The secret helper reads `MQTT_USERNAME`, `MQTT_PASSWORD`, `EMQX_API_URL`,
+`EMQX_APP_ID`, and `EMQX_APP_SECRET` from ignored `.env`, plus PEM data from
+ignored `emqxsl-ca.crt`. It uploads only changed values, without printing them.
+Redeploy functions after rotation. Old secret versions remain;
 disable superseded versions after confirming the new deployment works.
 
 Runtime identity: `drawbridge-functions@drawbridge-45487.iam.gserviceaccount.com`.
-It needs `roles/datastore.user` on the project and Secret Accessor on the three
-MQTT secrets (the Firebase deploy command grants secret access). It does not
+It needs `roles/datastore.user` on the project and Secret Accessor on the MQTT
+and EMQX secrets (the Firebase deploy command grants secret access). It does not
 need project Editor. Browser invitations also require the custom Auth role above.
 Functions use 256 MiB, zero minimum instances, two maximum
 instances each, and a 30-second timeout. Function build images are cleaned up
