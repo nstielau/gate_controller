@@ -1,4 +1,4 @@
-# XIAO CircuitPython development
+# Drawbridge CircuitPython development
 
 # FeatherWing fabrication
 
@@ -92,6 +92,27 @@
   write transaction. Update only `name`, validate 1–80 trimmed characters,
   and render as text. Renaming must never publish MQTT or modify routing.
 
+# QR device registration
+
+- A public device ID alone is not proof of ownership. First enroll a physically
+  attached board with `make device-pairing-enroll PORT=/dev/cu.usbmodem...` using
+  project IAM. This creates `devicePairingBindings/<id>` with the derived public
+  hash and refuses replacement by a different identity. Public endpoints must
+  never create this binding or fall back to accepting an unbound ID.
+- Preserve the random private pairing proof in NVM. Only its SHA-256 derived
+  code belongs in the QR fragment; the private proof travels only in verified
+  TLS device POST bodies. Never print the proof, credentials, or full NVM.
+  Browser claims/status require verified Google auth and App Check.
+- Preserve QR query/fragment across the canonical-origin redirect, capture the
+  fragment before auth initialization, remove it from the address bar, and keep
+  the pairing intent through OAuth. Existing gate owners must still see the
+  scanned device's registration flow. Keep manual code entry unnecessary.
+- Retry provisioning with the same encrypted credential envelope and broker
+  identity. Enable controls only after the device persists credentials,
+  subscribes to its exact MQTT topic, and acknowledges completion. Browser
+  responses never contain MQTT credentials. Registration never actuates a gate.
+  See `firebase/README.md` and `docs/superpowers/plans/2026-11-16-qr-pairing.md`.
+
 # CircuitPython workflow
 
 - Source of record: `circuitpython/`, never the mounted board. The former
@@ -109,12 +130,44 @@
 - Deployment preflights credentials and the CA, copies changed files including
   libraries, and preserves unrelated device files/settings. Default destination
   is `/Volumes/CIRCUITPY`; override with `CIRCUITPY=/path`.
+- Identify the actual board using `boot_out.txt` and `board.board_id` before
+  choosing firmware, polarity or pins. Trace physical FeatherWing header nets
+  in `hardware/featherwing/generate.py`; XIAO pin aliases are not portable.
+  If a starter app runs instead, inspect competing root startup files and verify
+  the interpreter is executing the deployed `code.py` loader.
+- Use `tools/xiao_console.py`/`open_console` for USB access (DTR asserted, RTS
+  deasserted), with one serial reader at a time. Await command completion and
+  confirm the REPL is ready before disabling autoreload and copying a bundle.
+  Restart deliberately afterward and verify the reported app/base pair; a
+  successful copy alone does not establish that the new firmware is running.
+- Probe new helpers on actual CircuitPython before deployment. Host Python
+  tests miss interpreter differences: use `hashlib.new("sha256")` and encode
+  digest bytes explicitly; do not assume `hashlib.sha256`, `hexdigest`, or the
+  two-argument `next(iterator, default)` is available on the target.
 - Keep credentials in ignored `.env`, the CA in ignored `emqxsl-ca.crt`, and
   logs/results in ignored `artifacts/`. Never print or commit secrets.
   `tools/env_config.py` is the shared literal dotenv parser. Only
   `MQTT_USERNAME` and `MQTT_PASSWORD` go into device `settings.toml`;
   never copy REST API credentials. Settings are readable over USB.
   Do not expose saved Wi-Fi credentials while inspecting NVM.
+
+# Captive Wi-Fi setup
+
+- Store up to five networks in NVM; adding/updating/forgetting Wi-Fi must preserve
+  the pairing proof, registration acknowledgment and per-device MQTT identity.
+  A blank password keeps an existing password; Open network explicitly clears
+  it. Keep GATE1/GATE2/GATE3 migration support and never prefill saved passwords.
+- On Reverse TFT Feather, hold D1 while pressing/releasing RESET, then release
+  D1 when setup appears. D1 is active HIGH. Join `Gate-Setup-<suffix>` and open
+  `http://192.168.4.1`. Failed saved networks keep retrying station mode; opening
+  an AP is an explicit setup action unless there are no saved networks.
+- Keep a visible Save and connect button on mobile. Selecting an SSID hides
+  and disables manual entry; choosing the default option restores it. Preserve
+  the Drawbridge branding and escape displayed SSIDs and messages.
+- Send complete HTTP bodies with tracked short writes and bounded EAGAIN retries.
+  Never retry an entire partially sent response. Close the successful response
+  before waiting ten seconds and restarting. Show the saved SSID, countdown and
+  phone reconnection instructions so success does not look like a broken page.
 
 # Runtime and pins
 
@@ -127,13 +180,13 @@
   does not provide a HIGH output voltage. Use `TEST_ARGS='--hold-pin D9'` with
   passive hardware checks on Feather.
 
-- Current firmware initializes transistor control `board.D10` (**GPIO9**) LOW.
+- XIAO firmware initializes transistor control `board.D10` (**GPIO9**) LOW.
   A valid timed MQTT hold raises D10 steadily until monotonic expiry or exit.
   D9 is the optional OTA maintenance input. Indicator servicing must never toggle D10.
-- The onboard `board.LED` is **active low**: two 100 ms pulses, starting 250 ms
+- XIAO's onboard `board.LED` is **active low**: two 100 ms pulses, starting 250 ms
   apart, every two seconds show the loop is running, independent of connectivity
   and hold state.
-- External LEDs are active HIGH: D0/GPIO1 is Wi-Fi (500 ms transitions until
+- XIAO external LEDs are active HIGH: D0/GPIO1 is Wi-Fi (500 ms transitions until
   connected, then ON); D1/GPIO2 is MQTT (OFF without Wi-Fi, 500 ms transitions
   until subscribed, then ON); D2/GPIO3 is hold (OFF unless D10 is HIGH,
   four full cycles/second with 125 ms transitions).
@@ -147,7 +200,9 @@
 - Missing settings start an open `Gate-Setup-<chip suffix>` AP and portal at
   `http://192.168.4.1`. Saved settings use station mode with retry, not an
   automatic fallback portal. Preserve NVM GATE1/GATE2/GATE3 compatibility.
-  Deploy-time MQTT credentials override NVM.
+  Deploy-time MQTT credentials apply only to legacy configurations that are
+  neither awaiting registration nor already registered; preserve per-device
+  NVM credentials once registration is pending or complete.
 - Default topics: `gate/v1/devices/<device-id>/command` and `/status`.
   Hold payloads are `{"version":1,"type":"hold_gate",
   "duration_seconds":5,"command_id":"..."}` and are never retained;
@@ -157,9 +212,13 @@
   must remain short; TLS and packet bodies need longer deadlines. Do not
   hide ValueError as a connection failure, publish inside callbacks, or
   subscribe twice after reconnecting.
-- Bounded GATE_LOG records include boot IDs, indicator modes, four D2 edge
+- Bounded GATE_LOG records include boot IDs, indicator modes, four hold-LED edge
   samples per mode change/heartbeat, and ten-second online heartbeats with
   independent Wi-Fi/MQTT states and an onboard `alive_edge_count`.
+- Reverse TFT normal status uses a Drawbridge header with separate Wi-Fi, MQTT
+  and Hold rows. Keep QR registration/progress and the D1 setup reminder readable
+  on 240×135 pixels, with a four-module QR quiet zone. `device_display.py` is
+  USB-managed base firmware and requires the normal version bump/change note.
 
 # Verification
 
@@ -183,9 +242,14 @@
 - Hardware checks measure software GPIO writes, not optical/electrical output.
   Offline and inactive-hold behavior use host tests; the passive live test
   does not disconnect Wi-Fi or activate the gate. Report those limits accurately.
+- A TFT Hold ON message, broker PUBACK or GPIO log does not verify the green LED,
+  transistor circuit or gate. Confirm these separately when physical testing is
+  intended. An idle passive check with zero hold samples proves no hold timing.
 - `make console CONSOLE_WAIT=20` reads passively; use `CONSOLE_ARGS=--reload`
   only for an intentional Ctrl-C/Ctrl-D reload. Use one serial reader at a time.
   `make status` checks the mounted CircuitPython version.
+- Session summary and remaining physical checks:
+  `docs/session-notes/2026-11-16-feather-onboarding.md`.
 
 # Wiring
 
