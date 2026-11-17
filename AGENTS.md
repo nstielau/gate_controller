@@ -91,6 +91,14 @@
   verified Google auth/App Check and checks current device access inside the
   write transaction. Update only `name`, validate 1–80 trimmed characters,
   and render as text. Renaming must never publish MQTT or modify routing.
+- Usage counts represent broker-accepted nonzero holds, not physical openings.
+  Preserve `devices/<id>.holdCount`; private `usagePeople/<sha256(uid)>` and
+  `devices/<id>/usagePeople/<sha256(uid)>` documents store UID/holdCount for
+  person and person/gate totals. All increments share the pending-to-accepted
+  command transaction; derive identity/duration from its reserved audit record.
+  Never count End hold, unknown/pending/rejected commands or replayed finishes.
+  Person counters begin at deployment with no historical backfill. Keep them
+  server-only and covered by deny-all client rules.
 
 # QR device registration
 

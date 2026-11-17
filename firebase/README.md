@@ -97,6 +97,18 @@ Accepted timed holds are counted server-side in each device record as
 `holdCount` and shown as a small “holds issued” metric in the web app. End-hold
 commands and uncertain deliveries do not increment the count.
 
+Private usage totals also live at `usagePeople/<sha256(uid)>` and
+`devices/<device-id>/usagePeople/<sha256(uid)>`. Each stores `uid` and
+`holdCount`, giving per-person and per-person/per-gate totals. These new person
+counters start with their deployment; historical commands are not backfilled,
+and existing device totals are preserved. All three increments commit in the
+same transaction as the pending command becoming accepted. Replays, transaction
+retries, rejected/pending commands, uncertain deliveries and End hold cannot
+increment them. Identity and nonzero duration come from the reserved command.
+They measure broker-accepted holds, not confirmed physical openings. Person
+statistics are IAM-only for now: no new browser/API fields, and deny-all client
+rules cover both usage paths.
+
 Firestore transactions reserve commands before publishing, enforce a
 three-second per-device cooldown, and prevent a repeated request ID from
 publishing again. A changed payload with the same ID is rejected. Commands

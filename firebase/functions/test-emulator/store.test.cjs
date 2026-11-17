@@ -87,7 +87,7 @@ test("Firestore rules deny direct client reads and writes, even when signed in",
   const token = encode({alg: "none", typ: "JWT"}) + "." + encode({aud: "demo-drawbridge", iss: "https://securetoken.google.com/demo-drawbridge", sub: "operator", user_id: "operator", iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600, firebase: {sign_in_provider: "google.com"}}) + ".";
   for (const auth of [null, token]) {
     const headers = {"Content-Type": "application/json", ...(auth ? {Authorization: "Bearer " + auth} : {})};
-    for (const collection of ["devices", "commands", "users", "admins", "adminAudit", "deviceAccessAudit", "firmwareReleases"]) {
+    for (const collection of ["devices", "commands", "users", "admins", "adminAudit", "deviceAccessAudit", "firmwareReleases", "usagePeople", "devices/" + f.id + "/usagePeople"]) {
       const url = "http://" + process.env.FIRESTORE_EMULATOR_HOST + "/v1/projects/demo-drawbridge/databases/(default)/documents/" + collection + "/" + f.id;
       assert.equal((await fetch(url, {headers})).status, 403);
       assert.equal((await fetch(url, {method: "PATCH", headers, body: JSON.stringify({fields: {enabled: {booleanValue: true}}})})).status, 403);
@@ -107,4 +107,74 @@ test("nickname persists for assigned users without changing gate configuration o
   }
   await db.doc("devices/" + f.id).delete();
   await assert.rejects(f.controller.renameGate({...f.request, data: {deviceId: f.id, nickname: "Missing"}}), {publicCode: "permission-denied"});
+});
+
+test("private usage totals count accepted holds across people and gates exactly once", async () => {
+  const {createHash} = require("node:crypto");
+  const first = "usage-" + randomUUID(), second = "usage-" + randomUUID();
+  const gates = [await fixture(), await fixture()];
+  for (const f of gates) await db.doc("devices/" + f.id).update({allowedUsers: [first, second], holdCount: 10});
+  const personRef = uid => db.doc("usagePeople/" + createHash("sha256").update(uid).digest("hex"));
+  const gatePersonRef = (f, uid) => db.doc("devices/" + f.id + "/usagePeople/" + createHash("sha256").update(uid).digest("hex"));
+  const request = (f, uid, durationSeconds = 60) => ({...f.request, auth: {...f.request.auth, uid}, data: {...f.request.data, durationSeconds, requestId: randomUUID()}});
+  // Two simultaneous different gates must not lose a shared person's increment.
+  const attempts = gates.map(f => request(f, first));
+  const results = await Promise.all(gates.map((f, i) => f.controller.holdGate(attempts[i])));
+  await Promise.all(gates.flatMap((f, i) => [
+    f.controller.holdGate(attempts[i]),
+    store.finish({id: results[i].commandId, status: "accepted", deviceId: f.id, durationSeconds: 60, time: f.now})
+  ]));
+  assert.deepEqual((await personRef(first).get()).data(), {uid: first, holdCount: 2});
+  for (const f of gates) {
+    assert.deepEqual((await gatePersonRef(f, first).get()).data(), {uid: first, holdCount: 1});
+    assert.equal((await db.doc("devices/" + f.id).get()).data().holdCount, 11);
+    assert.equal(f.publishes.length, 1);
+  }
+  const f = gates[0], time = f.now + 4000;
+  const controller = createController({store, now: () => time, publish: async (...args) => f.publishes.push(args)});
+  const next = request(f, second); next.data.issuedAtMs = time;
+  await controller.holdGate(next);
+  assert.deepEqual((await personRef(second).get()).data(), {uid: second, holdCount: 1});
+  assert.deepEqual((await gatePersonRef(f, second).get()).data(), {uid: second, holdCount: 1});
+  assert.equal((await db.doc("devices/" + f.id).get()).data().holdCount, 12);
+  const listed = (await f.controller.listDevices(attempts[0])).devices.find(d => d.id === f.id);
+  assert.deepEqual(Object.keys(listed).sort(), ["hold", "holdCount", "id", "name"]);
+  assert.equal(listed.holdCount, 12);
+});
+
+test("end hold, unknown, rejected and pending commands do not create person usage", async () => {
+  const {createHash} = require("node:crypto");
+  for (const mode of ["end", "unknown", "rejected", "pending"]) {
+    const f = await fixture(), uid = "excluded-" + randomUUID();
+    await db.doc("devices/" + f.id).update({allowedUsers: mode === "rejected" ? [] : [uid]});
+    const request = {...f.request, auth: {...f.request.auth, uid}, data: {...f.request.data, durationSeconds: mode === "end" ? 0 : 60}};
+    if (mode === "pending") {
+      await store.reserve({id: randomUUID(), uid, deviceId: f.id, durationSeconds: 60, time: f.now});
+    } else {
+      const controller = createController({store, now: () => f.now, publish: async () => {if (mode === "unknown") throw Error("uncertain");}});
+      if (mode === "rejected") await assert.rejects(controller.holdGate(request), {publicCode: "permission-denied"});
+      else {
+        assert.equal((await controller.holdGate(request)).status, mode === "unknown" ? "unknown" : "accepted");
+        await controller.holdGate(request);
+      }
+    }
+    const key = createHash("sha256").update(uid).digest("hex");
+    assert.equal((await db.doc("usagePeople/" + key).get()).exists, false);
+    assert.equal((await db.doc("devices/" + f.id + "/usagePeople/" + key).get()).exists, false);
+    assert.equal((await db.doc("devices/" + f.id).get()).data().holdCount || 0, 0);
+  }
+});
+
+test("simultaneous finishes of one pending command increment all usage totals once", async () => {
+  const {createHash} = require("node:crypto");
+  const f = await fixture(), uid = "finish-race-" + randomUUID(), id = randomUUID();
+  await db.doc("devices/" + f.id).update({allowedUsers: [uid]});
+  await store.reserve({id, uid, deviceId: f.id, durationSeconds: 60, time: f.now});
+  await Promise.all(Array.from({length: 6}, () => store.finish({id, status: "accepted", deviceId: f.id, durationSeconds: 60, time: f.now})));
+  const key = createHash("sha256").update(uid).digest("hex");
+  assert.equal((await db.doc("commands/" + id).get()).data().status, "accepted");
+  assert.equal((await db.doc("devices/" + f.id).get()).data().holdCount, 1);
+  for (const path of ["usagePeople/" + key, "devices/" + f.id + "/usagePeople/" + key]) {
+    assert.deepEqual((await db.doc(path).get()).data(), {uid, holdCount: 1});
+  }
 });

@@ -1,4 +1,6 @@
 const {canControl, fail} = require("./controller.cjs");
+const {createHash} = require("node:crypto");
+const {FieldValue} = require("firebase-admin/firestore");
 function createStore(db) {
   return {
     async rename({uid, deviceId, name}) {
@@ -48,9 +50,16 @@ function createStore(db) {
         const [command, device] = await tx.getAll(commandRef, deviceRef);
         if (!command.exists || command.data().status !== "pending") return;
         tx.update(commandRef, {status, completedAtMs: time});
-        if (status === "accepted" && durationSeconds > 0) {
+        if (status === "accepted" && command.data().durationSeconds > 0) {
           const previous = Number.isSafeInteger(device.data()?.holdCount) ? device.data().holdCount : 0;
           tx.update(deviceRef, {holdCount: previous + 1});
+          // The reserved command supplies identity. The pending transition makes
+          // all three counters atomic and idempotent, including transaction retries.
+          const uid = command.data().uid;
+          const person = createHash("sha256").update(uid).digest("hex");
+          for (const path of [`usagePeople/${person}`, `devices/${deviceId}/usagePeople/${person}`]) {
+            tx.set(db.doc(path), {uid, holdCount: FieldValue.increment(1)}, {merge: true});
+          }
         }
         // A later command may already be in flight. Never let an older result
         // overwrite its visible hold state.
