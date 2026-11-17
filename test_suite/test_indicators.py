@@ -95,6 +95,52 @@ class IndicatorTests(unittest.TestCase):
 class OutputTests(unittest.TestCase):
     setUp = regressions.ConfigTests.setUp
 
+    def test_local_countdown_runs_offline_without_excessive_redraws_or_lease_changes(self):
+        self.app.hold.apply('{"version":1,"type":"hold_gate","duration_seconds":60}', 100)
+        self.app.gate_output = SimpleNamespace(value=False)
+        self.app.display = MagicMock()
+        self.app.display_onboarding = False
+        self.app.wifi.radio.connected = False
+        with (
+            patch.object(
+                self.app.time, "monotonic", side_effect=[100, 100.2, 100.9, 101, 101.7, 160]
+            ),
+            patch.object(self.app, "service_status_led"),
+        ):
+            for _ in range(5):
+                self.app.service_outputs(None, online=False)
+                self.assertTrue(self.app.gate_output.value)
+            self.app.service_outputs(None, online=False)
+        self.assertFalse(self.app.gate_output.value)
+        self.assertEqual(
+            self.app.display.show_status.call_args_list,
+            [
+                call(wifi=False, mqtt=False, hold=True, remaining_seconds=60),
+                call(wifi=False, mqtt=False, hold=True, remaining_seconds=59),
+                call(wifi=False, mqtt=False, hold=False, remaining_seconds=0),
+            ],
+        )
+
+    def test_replaced_and_cancelled_hold_updates_countdown_immediately(self):
+        self.app.gate_output = SimpleNamespace(value=False)
+        self.app.display = MagicMock()
+        self.app.display_onboarding = False
+        self.app.wifi.radio.connected = True
+        with (
+            patch.object(self.app.time, "monotonic", return_value=100),
+            patch.object(self.app, "service_status_led"),
+        ):
+            for duration in (60, 5, 0):
+                self.app.hold.apply(
+                    '{"version":1,"type":"hold_gate","duration_seconds":%s}' % duration, 100
+                )
+                self.app.service_outputs(None, online=True)
+                self.assertEqual(self.app.gate_output.value, duration > 0)
+        self.assertEqual(
+            [c.kwargs["remaining_seconds"] for c in self.app.display.show_status.call_args_list],
+            [60, 5, 0],
+        )
+
     def test_feather_drives_wing_indicators_and_active_high_heartbeat(self):
         regressions.ConfigTests.setUp(self, board_id="adafruit_feather_esp32s3_reverse_tft")
         self.app.gate_output = SimpleNamespace(value=False)

@@ -845,9 +845,15 @@ def service_outputs(runtime, online):
     active = hold.active(now)
     gate_output.value = active
     service_status_led(bool(wifi.radio.connected), online, active, now)
-    status = (bool(wifi.radio.connected), bool(online), bool(active))
+    remaining = hold.remaining(now)
+    seconds = int(remaining)
+    if remaining > seconds:
+        seconds += 1  # Keep 00:01 visible until the lease actually expires.
+    status = (bool(wifi.radio.connected), bool(online), bool(active), seconds)
     if display is not None and not display_onboarding and status != display_last_status:
-        display.show_status(wifi=status[0], mqtt=status[1], hold=status[2])
+        display.show_status(
+            wifi=status[0], mqtt=status[1], hold=status[2], remaining_seconds=status[3]
+        )
         display_last_status = status
 
 

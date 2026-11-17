@@ -8,6 +8,15 @@ except ImportError:
 APP_URL = "https://drawbridge-45487.firebaseapp.com/"
 
 
+def format_hold_time(seconds):
+    seconds = max(0, int(seconds))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return "{}:{:02d}:{:02d}".format(hours, minutes, seconds)
+    return "{:02d}:{:02d}".format(minutes, seconds)
+
+
 def registration_qr_url(device_id, code=None):
     device_id = normalize_device_id(device_id)
     if code is None:
@@ -60,6 +69,7 @@ class ReverseTFT:
         self.display = display
         self.state = DisplayState(device_id)
         self.group = None
+        self._status_labels = None
 
     @classmethod
     def from_board(cls, device_id):
@@ -73,6 +83,7 @@ class ReverseTFT:
         if self.display is not None:
             self.display.root_group = group
             self.group = group
+            self._status_labels = None
 
     def show_boot(self):
         if self.display is None:
@@ -147,10 +158,26 @@ class ReverseTFT:
     def show_registration(self, phase, code):
         self.show_qr(code, phase)
 
-    def show_status(self, wifi=False, mqtt=False, hold=False):
+    def show_status(self, wifi=False, mqtt=False, hold=False, remaining_seconds=None):
         if self.display is None:
             return
+        hold_text = (format_hold_time(remaining_seconds) if remaining_seconds is not None else "ON") if hold else "OFF"
+        rows = (("Wi-Fi", "Connected" if wifi else "Connecting", wifi, 49),
+                ("MQTT", "Connected" if mqtt else "Reconnecting", mqtt, 78),
+                ("Hold", hold_text, hold, 107))
+        footer = "Reset ends hold" if hold else "D1 + RESET: Wi-Fi setup"
         try:
+            if self._status_labels is not None and self.display.root_group is self.group:
+                for title, value, active, _ in rows:
+                    target = self._status_labels[title]
+                    if target.text != value:
+                        target.text = value
+                    color = 0x173F35 if active else 0x66736B
+                    if target.color != color:
+                        target.color = color
+                if self._status_labels["footer"].text != footer:
+                    self._status_labels["footer"].text = footer
+                return
             import displayio
             import terminalio
             from adafruit_display_text import label
@@ -167,15 +194,17 @@ class ReverseTFT:
                                      scale=2, x=10, y=15))
             group.append(label.Label(terminalio.FONT, text=self.state.device_id, color=0xF3F4EB,
                                      x=self.display.width - 44, y=15))
-            rows = (("Wi-Fi", "Connected" if wifi else "Connecting", wifi, 49),
-                    ("MQTT", "Connected" if mqtt else "Reconnecting", mqtt, 78),
-                    ("Hold", "ON" if hold else "OFF", hold, 107))
+            values = {}
             for title, value, active, y in rows:
                 group.append(label.Label(terminalio.FONT, text=title, color=0x173F35,
                                          scale=2, x=10, y=y))
-                group.append(label.Label(terminalio.FONT, text=value,
-                                         color=0x173F35 if active else 0x66736B,
-                                         x=116, y=y, scale=2 if title == "Hold" else 1))
+                values[title] = label.Label(terminalio.FONT, text=value,
+                                            color=0x173F35 if active else 0x66736B,
+                                            x=116, y=y, scale=2 if title == "Hold" else 1)
+                group.append(values[title])
+            values["footer"] = label.Label(terminalio.FONT, text=footer, color=0x66736B, x=10, y=128)
+            group.append(values["footer"])
             self._show_group(group)
+            self._status_labels = values
         except (ImportError, AttributeError, RuntimeError, ValueError):
             return
