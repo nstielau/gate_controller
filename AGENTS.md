@@ -157,6 +157,19 @@
   the pairing proof, registration acknowledgment and per-device MQTT identity.
   A blank password keeps an existing password; Open network explicitly clears
   it. Keep GATE1/GATE2/GATE3 migration support and never prefill saved passwords.
+- Reverse TFT normal operation: D0 (active LOW) or D1 (active HIGH) toggles
+  the ordinary website QR, returning after 20 seconds. Never include pairing
+  parameters in that shortcut. D2 (active HIGH) selects the one-shot next-reboot
+  Normal/Wi-Fi setup action shown on the bottom TFT row. Persist before showing
+  success, consume the flag before setup, and debounce all inputs. Onboarding
+  consumes button state without triggering normal shortcuts. Buttons never
+  change a hold lease or reboot immediately.
+- Administration's Restart setup is private-proof authenticated on the device,
+  generation-fenced and idle-only. Preserve trusted identity, access and broker
+  envelope. Clear local credentials only after matching server ACK; retain old
+  Wi-Fi and pending marker on failure, and resume before MQTT on boot. Require a
+  fresh authorized same-generation QR claim. Never run a production reset just
+  for automated validation. See the base 1.0.13 note and restart-setup plan.
 - On Reverse TFT Feather, hold D1 while pressing/releasing RESET, then release
   D1 when setup appears. D1 is active HIGH. Join `Gate-Setup-<suffix>` and open
   `http://192.168.4.1`. Failed saved networks keep retrying station mode; opening
@@ -216,7 +229,7 @@
   samples per mode change/heartbeat, and ten-second online heartbeats with
   independent Wi-Fi/MQTT states and an onboard `alive_edge_count`.
 - Reverse TFT normal status uses a Drawbridge header with separate Wi-Fi, MQTT
-  and Hold rows. Keep QR registration/progress and the D1 setup reminder readable
+  and Hold rows. Keep QR registration/progress and the D2 next-reboot footer readable
   on 240×135 pixels, with a four-module QR quiet zone. `device_display.py` is
   USB-managed base firmware and requires the normal version bump/change note.
 

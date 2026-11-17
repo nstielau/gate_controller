@@ -501,3 +501,156 @@ test("compact QR links open registration for existing accounts", async ({page}) 
   expect(new URL(page.url()).hash).toBe("");
   expect(await page.evaluate(() => window.__claims || [])).toEqual([]);
 });
+
+async function openSetupAdmin(page, device = {}) {
+  await page.addInitScript(value => {
+    window.__scenario = "admin";
+    window.__setupDevice = {id: "test-device", name: "Garden gate", enabled: true, otaEnrolled: false,
+      maintenance: {supportsRestartSetup: true, lastSeenAtMs: Date.now(), appVersion: "1.0.0", baseVersion: "1.0.13"}, ...value};
+  }, device);
+  await page.goto("/");
+  await page.locator("#account-menu-button").click();
+  await page.locator("#admin-open").click();
+  await page.getByRole("tab", {name: "Device Firmware", exact: true}).click();
+}
+
+test("restart setup supports non-OTA devices, confirms cleanup, and sends only one explicit request", async ({page}) => {
+  await openSetupAdmin(page);
+  const restart = page.getByRole("button", {name: "Restart setup", exact: true});
+  await expect(restart).toBeVisible();
+  page.once("dialog", dialog => {
+    expect(dialog.message()).toContain("saved Wi-Fi and MQTT");
+    expect(dialog.message()).toContain("identity and access");
+    return dialog.dismiss();
+  });
+  await restart.click();
+  expect(await page.evaluate(() => window.__adminChanges || [])).toEqual([]);
+  page.once("dialog", dialog => dialog.accept());
+  await restart.click();
+  await expect(page.locator("#admin-devices")).toContainText("Restart setup queued");
+  const changes = await page.evaluate(() => window.__adminChanges);
+  expect(changes).toHaveLength(1);
+  expect(changes[0]).toMatchObject({action: "restartSetup", deviceId: "test-device"});
+  expect(changes[0].requestId).toMatch(/^[a-f0-9-]{36}$/);
+  expect(changes[0].issuedAtMs).toBeGreaterThan(0);
+  await expect(restart).toBeDisabled();
+  expect(await page.evaluate(() => window.__commands || [])).toEqual([]);
+});
+
+test("restart setup explains USB updates and blocks disabled or unsupported devices", async ({page}) => {
+  await openSetupAdmin(page, {maintenance: null});
+  await expect(page.locator("#admin-devices")).toContainText("USB update required to restart setup");
+  await expect(page.getByRole("button", {name: "Restart setup", exact: true})).toHaveCount(0);
+  await page.evaluate(() => { window.__setupDevice.maintenance = {supportsRestartSetup: true, lastSeenAtMs: Date.now()}; window.__setupDevice.enabled = false; });
+  await page.getByRole("button", {name: "Refresh administration"}).click();
+  await expect(page.getByRole("button", {name: "Restart setup", exact: true})).toBeDisabled();
+});
+
+test("restart setup pending status distinguishes a device waiting offline and refreshes through confirmed setup", async ({page}) => {
+  await page.clock.install();
+  await openSetupAdmin(page, {enabled: false, maintenance: {supportsRestartSetup: true, lastSeenAtMs: Date.now() - 120000}, setupReset: {state: "pending", requestedAtMs: Date.now()}});
+  await expect(page.locator("#admin-devices")).toContainText("Waiting for the device to reconnect");
+  await page.evaluate(() => { window.__setupDevice.setupReset.state = "awaiting_setup"; });
+  await page.clock.fastForward(5000);
+  await expect(page.locator("#admin-devices")).toContainText("Set up Wi-Fi on the device, then scan its QR code");
+  await page.evaluate(() => { window.__setupDevice.setupReset.state = "provisioning"; });
+  await page.clock.fastForward(5000);
+  await expect(page.locator("#admin-devices")).toContainText("Waiting for the device to confirm connection");
+  await page.evaluate(() => { window.__setupDevice.setupReset.state = "complete"; window.__setupDevice.enabled = true; });
+  await page.clock.fastForward(5000);
+  await expect(page.locator("#admin-devices")).toContainText("Setup complete");
+  const reads = await page.evaluate(() => window.__adminReads);
+  await page.clock.fastForward(15000);
+  expect(await page.evaluate(() => window.__adminReads)).toBe(reads);
+  expect(await page.evaluate(() => window.__adminChanges || [])).toEqual([]);
+});
+
+test("restart setup never retries an uncertain mutation and prevents repeated clicks while saving", async ({page}) => {
+  await openSetupAdmin(page);
+  await page.evaluate(() => { window.__delayAdminChange = true; window.__failAdminChange = true; });
+  page.on("dialog", dialog => dialog.accept());
+  const restart = page.getByRole("button", {name: "Restart setup", exact: true});
+  await restart.click();
+  await expect(restart).toBeDisabled();
+  await restart.dispatchEvent("click");
+  await page.evaluate(() => window.__releaseAdminChange());
+  await expect(page.locator("#admin-result")).toContainText("Couldn't confirm this change");
+  await expect(restart).toBeEnabled();
+  expect(await page.evaluate(() => window.__adminChanges.length)).toBe(1);
+  expect(await page.evaluate(() => window.__commands || [])).toEqual([]);
+});
+
+test("restart setup polling pauses offline and discards a stale refresh after sign-out", async ({page, context}) => {
+  await page.clock.install();
+  await openSetupAdmin(page, {enabled: false, setupReset: {state: "pending", requestedAtMs: Date.now()}});
+  await context.setOffline(true);
+  const reads = await page.evaluate(() => window.__adminReads);
+  await page.clock.fastForward(15000);
+  expect(await page.evaluate(() => window.__adminReads)).toBe(reads);
+  await context.setOffline(false);
+  await page.evaluate(() => { window.__delayAdminOverview = true; });
+  await page.clock.fastForward(5000);
+  await expect.poll(() => page.evaluate(() => typeof window.__releaseAdminOverview)).toBe("function");
+  await page.locator("#account-menu-button").click();
+  await page.locator("#sign-out").click();
+  await page.evaluate(() => window.__releaseAdminOverview());
+  await expect(page.locator("#admin-view")).toBeHidden();
+  await expect(page.locator("#admin-devices")).toBeEmpty();
+  const afterSignout = await page.evaluate(() => window.__adminReads);
+  await page.clock.fastForward(15000);
+  expect(await page.evaluate(() => window.__adminReads)).toBe(afterSignout);
+});
+
+
+test("restart setup ignores an older polling snapshot after a newer manual refresh", async ({page}) => {
+  await page.clock.install();
+  await openSetupAdmin(page, {enabled: false, setupReset: {state: "pending", requestedAtMs: Date.now()}});
+  await page.evaluate(() => { window.__delayAdminOverview = true; });
+  await page.clock.fastForward(5000);
+  await expect.poll(() => page.evaluate(() => typeof window.__releaseAdminOverview)).toBe("function");
+  await page.evaluate(() => {
+    window.__delayAdminOverview = false;
+    window.__setupDevice.setupReset.state = "complete";
+    window.__setupDevice.enabled = true;
+  });
+  await page.getByRole("button", {name: "Refresh administration"}).click();
+  await expect(page.locator("#admin-devices")).toContainText("Setup complete");
+  await page.evaluate(() => window.__releaseAdminOverview());
+  await expect(page.locator("#admin-devices")).toContainText("Setup complete");
+  const reads = await page.evaluate(() => window.__adminReads);
+  await page.clock.fastForward(15000);
+  expect(await page.evaluate(() => window.__adminReads)).toBe(reads);
+  expect(await page.evaluate(() => window.__adminChanges || [])).toEqual([]);
+});
+
+
+test("restart setup ignores an old read failure after a newer admin mutation", async ({page}) => {
+  await page.clock.install();
+  await openSetupAdmin(page, {enabled: false, setupReset: {state: "pending", requestedAtMs: Date.now()}});
+  await page.evaluate(() => { window.__delayAdminOverview = true; window.__failAdminOverview = true; });
+  await page.clock.fastForward(5000);
+  await expect.poll(() => page.evaluate(() => typeof window.__releaseAdminOverview)).toBe("function");
+  await page.evaluate(() => { window.__delayAdminOverview = false; window.__failAdminOverview = false; });
+  await page.getByRole("tab", {name: "Admins", exact: true}).click();
+  await page.locator("#admin-email").fill("friend@example.test");
+  page.on("dialog", dialog => dialog.accept());
+  await page.getByRole("button", {name: "Add administrator", exact: true}).click();
+  await expect(page.locator("#admin-result")).toHaveText("Saved.");
+  await page.evaluate(() => window.__releaseAdminOverview());
+  await expect(page.locator("#admin-result")).toHaveText("Saved.");
+});
+
+test("a persisted claim across restart setup asks for on-device Wi-Fi and a fresh QR scan", async ({page}) => {
+  await page.clock.install();
+  await page.addInitScript(code => {
+    window.__scenario = "claim-awaiting-setup";
+    sessionStorage.setItem("drawbridge.pairing", JSON.stringify({deviceId: "ab12cd", pairingCode: code, createdAtMs: Date.now(), submitted: true}));
+  }, pairingCode);
+  await page.goto("/");
+  await expect(page.locator("#device-onboarding-status")).toHaveText("Set up Wi-Fi on the device, then scan its QR code.");
+  await expect(page.locator("#controls")).toBeHidden();
+  await page.clock.fastForward(10000);
+  expect(await page.evaluate(() => window.__claimPolls)).toBe(1);
+  expect(await page.evaluate(() => window.__claims || [])).toEqual([]);
+  expect(await page.evaluate(() => window.__commands || [])).toEqual([]);
+});

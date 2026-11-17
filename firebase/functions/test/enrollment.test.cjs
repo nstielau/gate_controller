@@ -213,3 +213,88 @@ test("HTTP handler forwards private proof and acknowledgment, uses no-store and 
   await handler({method: "GET"}, response); assert.equal(response.code, 405);
   await handler({method: "OPTIONS"}, response); assert.equal(response.code, 204);
 });
+
+async function registeredFixture() {
+  const f = fixture(); await f.api.claim(f.request);
+  f.credentials = await f.api.register(f.device);
+  await f.api.register({...f.device, action: "complete"});
+  return f;
+}
+function queueReset(f, generation = digest("reset-generation")) {
+  const ref = "devices/" + f.id, device = f.db.get(ref);
+  f.db.records.set(ref, {...device, enabled: false, setupReset: {id: generation, state: "pending", requestedAtMs: start, actor: "administrator"}});
+  return generation;
+}
+test("maintenance authenticates private proof and supported versions and exposes only reset metadata", async () => {
+  const f = await registeredFixture();
+  const maintenance = {...f.device, action: "maintenance", app_version: "1.0.4", base_version: "1.0.13"};
+  assert.deepEqual(await f.api.register(maintenance), {deviceId: f.id, restartSetup: null});
+  assert.deepEqual(f.db.get("devices/" + f.id).maintenance, {appVersion: "1.0.4", baseVersion: "1.0.13", lastSeenAtMs: start, supportsRestartSetup: true});
+  for (const changes of [{base_version: "1.0.12"}, {base_version: "01.0.13"}, {app_version: "bad"}, {device_secret: f.code}]) {
+    await assert.rejects(f.api.register({...maintenance, ...changes}));
+  }
+  const id = queueReset(f);
+  assert.deepEqual(await f.api.register(maintenance), {deviceId: f.id, restartSetup: {id, state: "pending"}});
+  f.db.get("devices/" + f.id).commandTopic = "other";
+  await assert.rejects(f.api.register(maintenance), {publicCode: "failed-precondition"});
+});
+test("reset acknowledgment survives lost responses and only a fresh authorized generation claim replays credentials", async () => {
+  const f = await registeredFixture(), id = queueReset(f);
+  const resetDevice = {...f.device, setup_reset_id: id};
+  assert.equal((await f.api.claim(f.request)).state, "pending");
+  assert.notEqual((await f.api.status(f.request)).state, "registered");
+  for (const action of [undefined, "complete"]) {
+    await assert.rejects(f.api.register({...f.device, action}), {publicCode: "failed-precondition"});
+    await assert.rejects(f.api.register({...resetDevice, action}), {publicCode: "failed-precondition"});
+  }
+  const ack = {...resetDevice, action: "restart_setup_complete"};
+  assert.deepEqual(await f.api.register(ack), {deviceId: f.id, state: "awaiting_setup", setup_reset_id: id});
+  assert.deepEqual(await f.api.register(ack), {deviceId: f.id, state: "awaiting_setup", setup_reset_id: id});
+  assert.equal(f.db.get("deviceEnrollments/" + f.id).state, "awaiting_setup");
+  assert.equal(f.db.get("claims/" + f.key).state, "expired");
+  await assert.rejects(f.api.register(resetDevice), {publicCode: "failed-precondition"});
+  const stranger = {...f.request, auth: {...auth, uid: "stranger"}};
+  await assert.rejects(f.api.claim(stranger), {publicCode: "failed-precondition"});
+  assert.equal((await f.api.status(stranger)).state, "unknown");
+  assert.equal((await f.api.claim(f.request)).state, "pending");
+  assert.equal(f.db.get("claims/" + f.key).setupResetId, id);
+  f.advance(CLAIM_MS + 1);
+  await assert.rejects(f.api.register(resetDevice), {publicCode: "failed-precondition"});
+  await f.api.claim(f.request);
+  const before = structuredClone(f.db.get("devices/" + f.id));
+  assert.deepEqual(await f.api.register(resetDevice), f.credentials);
+  assert.equal(f.calls.length, 1);
+  assert.equal((await f.api.status(f.request)).state, "provisioning");
+  assert.equal(f.db.get("devices/" + f.id).name, before.name);
+  assert.deepEqual(f.db.get("devices/" + f.id).allowedUsers, before.allowedUsers);
+  await assert.rejects(f.api.register(ack), {publicCode: "failed-precondition"});
+  await assert.rejects(f.api.register({...f.device, action: "complete"}), {publicCode: "failed-precondition"});
+  await assert.rejects(f.api.register({...resetDevice, setup_reset_id: digest("old"), action: "complete"}), {publicCode: "failed-precondition"});
+  assert.deepEqual(await f.api.register({...resetDevice, action: "complete"}), {deviceId: f.id, state: "registered"});
+  assert.equal(f.db.get("devices/" + f.id).setupReset.state, "complete");
+  assert.equal(f.db.get("devices/" + f.id).enabled, true);
+  f.db.get("devices/" + f.id).enabled = false;
+  assert.deepEqual(await f.api.register({...resetDevice, action: "complete"}), {deviceId: f.id, state: "registered"});
+  assert.equal(f.db.get("devices/" + f.id).enabled, false);
+  await assert.rejects(f.api.register(ack), {publicCode: "failed-precondition"});
+  assert.deepEqual(await f.api.register(resetDevice), f.credentials);
+});
+test("reset claims cannot replay credentials after their authorized claimant loses device access", async () => {
+  const f = await registeredFixture(), id = queueReset(f);
+  await f.api.register({...f.device, action: "restart_setup_complete", setup_reset_id: id});
+  await f.api.claim(f.request);
+  f.db.get("devices/" + f.id).allowedUsers = ["remaining-owner"];
+  await assert.rejects(f.api.register({...f.device, setup_reset_id: id}), {publicCode: "failed-precondition"});
+  assert.equal(f.calls.length, 1);
+});
+test("HTTP forwards maintenance versions and reset generation without exposing errors", async () => {
+  const f = await registeredFixture(), id = queueReset(f);
+  const handler = createRegistrationHandler(f.api);
+  const response = {set() {}, status(code) { this.code = code; return this; }, json(value) { this.body = value; return this; }};
+  await handler({method: "POST", body: {...f.device, action: "maintenance", app_version: "1.0.4", base_version: "1.0.13"}}, response);
+  assert.equal(response.code, 200);
+  assert.deepEqual(response.body.restartSetup, {id, state: "pending"});
+  await handler({method: "POST", body: {...f.device, action: "restart_setup_complete", setup_reset_id: id}}, response);
+  assert.equal(response.code, 200);
+  assert.deepEqual(response.body, {deviceId: f.id, state: "awaiting_setup", setup_reset_id: id});
+});

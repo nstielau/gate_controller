@@ -59,13 +59,20 @@ def pairing_code(secret):
     return "".join("{:02x}".format(value) for value in digest.digest())
 
 
-def registration_payload(device_id, secret=None, action=None):
+def registration_payload(device_id, secret=None, action=None, setup_reset_id=None,
+                         app_version=None, base_version=None):
     result = {"device_id": normalize_device_id(device_id),
               "device_secret": validate_pairing_secret(secret)}
     if action is not None:
-        if action != "complete":
+        if action not in ("complete", "maintenance", "restart_setup_complete"):
             raise ValueError("invalid registration action")
         result["action"] = action
+    if setup_reset_id is not None:
+        result["setup_reset_id"] = validate_pairing_secret(setup_reset_id)
+    if action == "restart_setup_complete" and setup_reset_id is None:
+        raise ValueError("setup reset id required")
+    if action == "maintenance":
+        result.update(app_version=app_version, base_version=base_version)
     return result
 
 

@@ -16,7 +16,7 @@ function userId(request) {
   return uid;
 }
 function canControl(device, deviceId, uid) {
-  return device?.enabled === true && DEVICE_ID.test(deviceId) &&
+  return device?.enabled === true && (!device.setupReset || device.setupReset.state === "complete") && DEVICE_ID.test(deviceId) &&
     Array.isArray(device.allowedUsers) && device.allowedUsers.includes(uid) &&
     device.commandTopic === `gate/v1/devices/${deviceId}/command`;
 }

@@ -87,3 +87,10 @@ test("nicknames require verified Google auth and valid device/name input", async
   assert.deepEqual(await controller.renameGate({auth, data: {deviceId: "gate1", nickname: "  Garden gate 🌿  ", commandTopic: "other", enabled: false}}), {id: "gate1", name: "Garden gate 🌿"});
   assert.deepEqual(writes, [{uid: "operator", deviceId: "gate1", name: "Garden gate 🌿"}]);
 });
+
+test("active setup reset generations block controls even if enabled is accidentally true", () => {
+  const {canControl} = require("../controller.cjs");
+  const device = {enabled: true, allowedUsers: ["owner"], commandTopic: "gate/v1/devices/test-gate/command"};
+  for (const state of ["pending", "awaiting_setup", "provisioning"]) assert.equal(canControl({...device, setupReset: {state}}, "test-gate", "owner"), false);
+  assert.equal(canControl({...device, setupReset: {state: "complete"}}, "test-gate", "owner"), true);
+});

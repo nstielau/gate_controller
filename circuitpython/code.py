@@ -36,6 +36,14 @@ from device_enrollment import (
 from device_display import ReverseTFT
 from gate_wifi import profiles, update_network, forget_network, connection_order
 from gate_portal import render_page, render_confirmation
+from gate_setup import (
+    ButtonEdge,
+    toggle_next_boot,
+    consume_next_boot,
+    pending_reset_config,
+    cleared_setup_config,
+    valid_reset_id,
+)
 
 
 CONFIG_SIZE = min(4096, len(microcontroller.nvm))
@@ -100,6 +108,9 @@ display = None
 display_onboarding = False
 display_last_status = None
 registration_phase = None
+ui_buttons = []
+next_boot_setup = False
+website_until = 0
 
 
 class Platform:
@@ -692,7 +703,14 @@ def registration_request(pool, config, action=None):
     try:
         response = session.post(
             REGISTRATION_ENDPOINT,
-            json=registration_payload(device_suffix(), config.get("pairing_secret"), action),
+            json=registration_payload(
+                device_suffix(),
+                config.get("pairing_secret"),
+                action,
+                setup_reset_id=config.get("setup_reset_id"),
+                app_version=ota_version,
+                base_version=BASE_VERSION,
+            ),
             timeout=8 if action else 25,
         )
         if response.status_code in (202, 400):
@@ -700,6 +718,26 @@ def registration_request(pool, config, action=None):
         if response.status_code != 200:
             raise OSError("registration_http_failed")
         data = response.json()
+        if not isinstance(data, dict) or data.get("deviceId") != device_suffix().lower():
+            raise ValueError("registration device mismatch")
+        if action == "maintenance":
+            reset = data.get("restartSetup")
+            if reset is not None:
+                if not isinstance(reset, dict) or reset.get("state") not in (
+                    "pending",
+                    "awaiting_setup",
+                    "provisioning",
+                    "complete",
+                ):
+                    raise ValueError("invalid setup reset")
+                valid_reset_id(reset.get("id"))
+            return data
+        if action == "restart_setup_complete":
+            if data.get("state") != "awaiting_setup" or data.get("setup_reset_id") != config.get(
+                "setup_reset_id"
+            ):
+                raise ValueError("invalid setup reset acknowledgment")
+            return data
         if action == "complete":
             if data.get("state") != "registered":
                 raise ValueError("invalid registration acknowledgment")
@@ -716,11 +754,54 @@ def complete_registration(pool, config):
     global display_onboarding, display_last_status
     if registration_request(pool, config, "complete") is None:
         return False
-    config["registration_acknowledged"] = True
-    save_config(config)
+    updated = dict(config, registration_acknowledged=True)
+    save_config(updated)
+    config.update(updated)
     display_onboarding = False
     display_last_status = None
     log_event("registration_complete")
+    return True
+
+
+def check_maintenance(pool, config, client):
+    """Persist reset intent before disconnecting; local leases always take priority."""
+    global display_onboarding
+    if hold.active(time.monotonic()):
+        return False
+    data = registration_request(pool, config, "maintenance")
+    reset = data.get("restartSetup") if data else None
+    if not reset or reset["state"] != "pending":
+        return False
+    client.poll()  # Drain a command that arrived while HTTPS was in flight.
+    if hold.active(time.monotonic()):
+        return False
+    updated = pending_reset_config(load_config() or config, reset["id"])
+    save_config(updated)
+    config.clear()
+    config.update(updated)
+    display_onboarding = True
+    client.close()
+    log_event("setup_reset_pending")
+    return True
+
+
+def finish_setup_reset(pool, config):
+    """Retry the same ACK after power loss; never discard credentials on failure."""
+    global display_onboarding
+    if hold.active(time.monotonic()):
+        return False
+    display_onboarding = True
+    if display is not None:
+        display.show_notice("Restarting setup", "Confirming with server")
+    response = registration_request(pool, config, "restart_setup_complete")
+    if response is None:
+        return False
+    updated = cleared_setup_config(config, response.get("setup_reset_id"))
+    save_config(updated)  # Keep config's old Wi-Fi/pending marker until this succeeds.
+    log_event("setup_reset_applied")
+    if display is not None:
+        display.show_notice("Setup ready", "Restarting Wi-Fi setup")
+    supervisor.reload()
     return True
 
 
@@ -740,6 +821,12 @@ def connect_saved_wifi(config, service=None):
             config.get("ssid") != network["ssid"]
             or config.get("password", "") != network["password"]
         ):
+            # A D2 press in the service callback may have saved newer intent.
+            saved = load_config() or {}
+            if saved.get("next_boot_setup") is True:
+                config["next_boot_setup"] = True
+            else:
+                config.pop("next_boot_setup", None)
             config.update(network)
             save_config(config)
         return
@@ -839,6 +926,44 @@ def on_mqtt_message(client, topic, message):
     log_event("hold_applied", command_id=hold.command_id, duration_seconds=hold.duration_seconds)
 
 
+def initialize_buttons():
+    if not IS_REVERSE_TFT:
+        return
+    for pin, active_high in ((board.D0, False), (board.D1, True), (board.D2, True)):
+        button = digitalio.DigitalInOut(pin)
+        try:
+            button.switch_to_input(pull=digitalio.Pull.DOWN if active_high else digitalio.Pull.UP)
+            edge = ButtonEdge(bool(button.value) == active_high, time.monotonic())
+            ui_buttons.append((button, active_high, edge))
+        except BaseException:
+            button.deinit()
+            raise
+
+
+def button_action(index, now):
+    global next_boot_setup, website_until
+    if index == 2:
+        # Registration may have replaced credentials since this loop started.
+        updated = toggle_next_boot(load_config())
+        save_config(updated)
+        next_boot_setup = updated.get("next_boot_setup") is True
+        log_event("next_boot_selected", setup=next_boot_setup)
+    else:
+        website_until = 0 if website_until > now else now + 20
+
+
+def service_buttons(now):
+    for index, (button, active_high, edge) in enumerate(ui_buttons):
+        pressed = bool(button.value) == active_high
+        if display_onboarding:
+            edge.sync(pressed, now)
+        elif edge.update(pressed, now):
+            try:
+                button_action(index, now)
+            except (OSError, RuntimeError, ValueError):
+                log_event("button_save_failed")
+
+
 def service_outputs(runtime, online):
     global display_last_status
     now = time.monotonic()
@@ -849,11 +974,28 @@ def service_outputs(runtime, online):
     seconds = int(remaining)
     if remaining > seconds:
         seconds += 1  # Keep 00:01 visible until the lease actually expires.
-    status = (bool(wifi.radio.connected), bool(online), bool(active), seconds)
+    service_buttons(now)
+    status = (
+        bool(wifi.radio.connected),
+        bool(online),
+        bool(active),
+        seconds,
+        next_boot_setup,
+        website_until > now,
+    )
     if display is not None and not display_onboarding and status != display_last_status:
-        display.show_status(
-            wifi=status[0], mqtt=status[1], hold=status[2], remaining_seconds=status[3]
-        )
+        if status[5]:
+            display.show_website(
+                hold=active, remaining_seconds=seconds, next_boot_setup=next_boot_setup
+            )
+        else:
+            display.show_status(
+                wifi=status[0],
+                mqtt=status[1],
+                hold=active,
+                remaining_seconds=seconds,
+                next_boot_setup=next_boot_setup,
+            )
         display_last_status = status
 
 
@@ -951,6 +1093,9 @@ def run_configured_controller(pool, config):
     if needs_ack:
         display_onboarding = True
         registration_progress(config, ("Connecting", "to MQTT..."))
+    if config.get("setup_reset_pending"):
+        display_onboarding = True
+    next_maintenance = 0
     next_registration_ack = 0
     runtime = {"command_topic": config["mqtt_command_topic"], "dirty": True}
     client = None
@@ -971,6 +1116,13 @@ def run_configured_controller(pool, config):
                     connect_saved_wifi(config, lambda: service_outputs(runtime, online=False))
                     log_event("wifi_connected", ip=str(wifi.radio.ipv4_address))
                 service_outputs(runtime, online=False)
+                if config.get("setup_reset_pending"):
+                    try:
+                        finish_setup_reset(pool, config)
+                    except (OSError, RuntimeError, ValueError):
+                        log_event("setup_reset_wait")
+                    next_attempt = time.monotonic() + 20
+                    continue
                 client = connect_mqtt(pool, config, runtime)
             if not wifi.radio.connected:
                 raise ConnectionError("Wi-Fi disconnected")
@@ -993,6 +1145,26 @@ def run_configured_controller(pool, config):
                     log_event("registration_ack_wait")
                     registration_progress(config, ("Connection OK", "Retrying ack"))
                 next_registration_ack = time.monotonic() + 20
+            if (
+                not needs_ack
+                and config.get("registration_acknowledged")
+                and config.get("pairing_secret")
+                and now >= next_maintenance
+                and not hold.active(time.monotonic())
+            ):
+                try:
+                    if check_maintenance(pool, config, client):
+                        client = None
+                        next_attempt = 0
+                        continue
+                except (OSError, RuntimeError, ValueError):
+                    log_event("maintenance_wait")
+                    # A close failure after durable intent must still prevent reconnect.
+                    if config.get("setup_reset_pending"):
+                        client = None
+                        next_attempt = 0
+                        continue
+                next_maintenance = time.monotonic() + 20
             ota_service(runtime, client)
         except (ConnectionError, MQTT.MMQTTException, OSError) as error:
             # ValueError is a programming/configuration error, not a network failure.
@@ -1007,7 +1179,7 @@ def run_configured_controller(pool, config):
 
 
 def main():
-    global gate_output, hold_led, wifi_led, mqtt_led, display
+    global gate_output, hold_led, wifi_led, mqtt_led, display, next_boot_setup, display_onboarding
     log_event("boot", reset_reason=str(microcontroller.cpu.reset_reason))
     outputs = []
     try:
@@ -1028,7 +1200,18 @@ def main():
                 startup_pin_diagnostic()
         gate_output, wifi_led, mqtt_led, hold_led = outputs
         force_setup = setup_requested()
-        config = add_settings_credentials(load_config())
+        saved = load_config()
+        if saved and "next_boot_setup" in saved:
+            saved, queued_setup = consume_next_boot(saved)
+            save_config(saved)
+            force_setup = force_setup or queued_setup
+        next_boot_setup = False
+        config = add_settings_credentials(saved)
+        # A durable remote reset must finish its server ACK before any portal/MQTT.
+        if config and config.get("setup_reset_pending"):
+            force_setup = False
+            display_onboarding = True
+        initialize_buttons()
         # Provisioning may run indefinitely; do not trial an app/start its
         # watchdog until saved Wi-Fi/MQTT settings are available.
         initialize_application(
@@ -1061,6 +1244,9 @@ def main():
             supervisor.reload()
         raise
     finally:
+        for button, _, _ in ui_buttons:
+            button.deinit()
+        ui_buttons.clear()
         for output in outputs:
             output.value = False
             output.deinit()

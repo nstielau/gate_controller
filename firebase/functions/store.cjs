@@ -27,6 +27,12 @@ function createStore(db) {
           }
           return {fresh: false, status: command.status};
         }
+        // The cooldown does not bound broker latency. Keep the one in-flight
+        // pointer until its matching result finishes; another publish must not
+        // replace it and hide pending delivery from a setup reset transaction.
+        if (device.pendingCommandId != null) {
+          fail("resource-exhausted", "A gate command is still pending. Check the gate before trying again.");
+        }
         if (Number.isFinite(device.lastRequestedAtMs) && time - device.lastRequestedAtMs < 3000) {
           fail("resource-exhausted", "Please wait a few seconds before another command.");
         }

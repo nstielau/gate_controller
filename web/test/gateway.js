@@ -17,6 +17,7 @@ export async function createGateway() {
     async deviceClaimStatus(data) {
       claimPolls++;
       window.__claimPolls = claimPolls;
+      if (scenario === "claim-awaiting-setup") return {deviceId: data.deviceId, state: "awaiting_setup", owned: true};
       if (scenario === "claim-expired") return {deviceId: data.deviceId, state: "expired", expiresAtMs: Date.now() - 1};
       if (scenario === "claim-success" && claimPolls === 2) return {deviceId: data.deviceId, state: "provisioning"};
       if (scenario === "claim-success" && claimPolls >= 3) {
@@ -35,11 +36,22 @@ export async function createGateway() {
     },
     async adminOverview() {
       if (scenario === "admin-revoked") throw new Error("revoked");
+      window.__adminReads = (window.__adminReads || 0) + 1;
+      const failOverview = window.__failAdminOverview;
+      const setupDevice = window.__setupDevice ? structuredClone(window.__setupDevice) : null;
+      if (window.__delayAdminOverview) await new Promise(resolve => { window.__releaseAdminOverview = resolve; });
+      if (failOverview) throw new Error("Overview unavailable");
       window.__admins ||= [{email: "nick.stielau@gmail.com", owner: true}];
-      return {admins: window.__admins, devices: [{id: "test-device", name: "Garden gate", enabled: true, otaEnrolled: true, target: window.__target || null, reported: window.__firmwareReport || null}], releases: [{version: "1.0.0"}]};
+      return {admins: window.__admins, devices: [setupDevice || {id: "test-device", name: "Garden gate", enabled: true, otaEnrolled: true, target: window.__target || null, reported: window.__firmwareReport || null}], releases: [{version: "1.0.0"}]};
     },
     async adminChange(data) {
       window.__adminChanges ||= []; window.__adminChanges.push(data);
+      if (window.__delayAdminChange) await new Promise(resolve => { window.__releaseAdminChange = resolve; });
+      if (window.__failAdminChange) throw new Error("Uncertain response");
+      if (data.action === "restartSetup") {
+        window.__setupDevice.enabled = false;
+        window.__setupDevice.setupReset = {state: "pending", requestedAtMs: Date.now()};
+      }
       if (data.action === "grantAdmin") window.__admins.push({email: data.email, owner: false});
       if (data.action === "revokeAdmin") window.__admins = window.__admins.filter(a => a.email !== data.email);
       if (data.action === "targetFirmware") window.__target = {version: data.version, sequence: 1, enabled: true};

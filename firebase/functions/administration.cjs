@@ -1,5 +1,6 @@
 const {createHash, timingSafeEqual} = require("node:crypto");
 const {userId, fail} = require("./controller.cjs");
+const {supportsRestartSetupVersion} = require("./enrollment.cjs");
 const OWNER = "nick.stielau@gmail.com";
 const hash = value => createHash("sha256").update(value).digest("hex");
 const DEVICE = /^[a-z0-9-]{1,64}$/;
@@ -24,6 +25,23 @@ function validateManifest(m) {
   }
   return Object.fromEntries(["schema", "app_version", "app_api_version", "minimum_bootstrap_version", "circuitpython_major", "supported_board_ids", "size", "sha256", "git_commit", "artifact_object"].map(k => [k, m[k]]));
 }
+function publicMaintenance(value) {
+  if (!value || typeof value !== "object") return null;
+  return {
+    supportsRestartSetup: value.supportsRestartSetup === true && supportsRestartSetupVersion(value.baseVersion),
+    lastSeenAtMs: Number.isSafeInteger(value.lastSeenAtMs) ? value.lastSeenAtMs : null,
+    appVersion: typeof value.appVersion === "string" && VERSION.test(value.appVersion) ? value.appVersion : null,
+    baseVersion: typeof value.baseVersion === "string" && VERSION.test(value.baseVersion) ? value.baseVersion : null,
+  };
+}
+function publicSetupReset(value) {
+  if (!value || !["pending", "awaiting_setup", "provisioning", "complete"].includes(value.state)) return null;
+  const result = {state: value.state};
+  for (const key of ["requestedAtMs", "acknowledgedAtMs", "provisioningAtMs", "completedAtMs"]) {
+    if (Number.isSafeInteger(value[key])) result[key] = value[key];
+  }
+  return result;
+}
 function createAdministration(db, now = Date.now) {
   const adminRef = email => db.doc("admins/" + hash(email));
   async function requireAdmin(tx, identity) {
@@ -47,7 +65,8 @@ function createAdministration(db, now = Date.now) {
           admins: admins.docs.map(d => ({email: d.data().email, owner: d.data().email === OWNER})),
           devices: devices.docs.map(d => ({id: d.id, name: d.data().name || d.id,
             enabled: d.data().enabled === true, otaEnrolled: !!d.data().otaCredentialHash,
-            target: d.data().firmwareTarget || null, reported: d.data().reportedFirmware || null})),
+            target: d.data().firmwareTarget || null, reported: d.data().reportedFirmware || null,
+            maintenance: publicMaintenance(d.data().maintenance), setupReset: publicSetupReset(d.data().setupReset)})),
           releases: releases.docs.filter(d => d.data().approved === true).map(d => ({version: d.id, sha256: d.data().sha256}))
         };
       });
@@ -56,7 +75,7 @@ function createAdministration(db, now = Date.now) {
       const identity = actor(request), data = request.data || {}, time = now();
       if (JSON.stringify(data).length > 2048 || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(data.requestId || "") || !Number.isSafeInteger(data.issuedAtMs) ||
           time - data.issuedAtMs > 60000 || data.issuedAtMs - time > 10000) fail("invalid-argument", "Request expired or invalid. Refresh and try again.");
-      if (!["grantAdmin", "revokeAdmin", "targetFirmware", "pauseFirmware"].includes(data.action)) fail("invalid-argument", "Unknown administrator action.");
+      if (!["grantAdmin", "revokeAdmin", "targetFirmware", "pauseFirmware", "restartSetup"].includes(data.action)) fail("invalid-argument", "Unknown administrator action.");
       const email = data.action.endsWith("Admin") ? emailAddress(data.email) : null;
       if (data.action === "revokeAdmin" && email === OWNER) fail("failed-precondition", "The owner cannot be removed here.");
       if (!email && !DEVICE.test(data.deviceId || "")) fail("invalid-argument", "Invalid device.");
@@ -81,9 +100,24 @@ function createAdministration(db, now = Date.now) {
             validateManifest(release);
           }
         }
+        if (data.action === "restartSetup") {
+          const binding = (await tx.get(db.doc("devicePairingBindings/" + data.deviceId))).data();
+          const enrollment = (await tx.get(db.doc("deviceEnrollments/" + data.deviceId))).data();
+          const active = device.activeHold;
+          if (!device.enabled || device.enrollmentState !== "registered" || enrollment?.state !== "registered" ||
+              !/^[a-f0-9]{64}$/.test(binding?.pairingCode || "") || enrollment.claimKey !== hash(data.deviceId + ":" + binding.pairingCode) ||
+              !["iv", "tag", "ciphertext"].every(key => typeof enrollment.envelope?.[key] === "string" && enrollment.envelope[key]) ||
+              device.commandTopic !== `gate/v1/devices/${data.deviceId}/command` || device.statusTopic !== `gate/v1/devices/${data.deviceId}/status` ||
+              device.maintenance?.supportsRestartSetup !== true || !supportsRestartSetupVersion(device.maintenance?.baseVersion) ||
+              (device.setupReset && device.setupReset.state !== "complete")) fail("failed-precondition", "Device must be registered and support restarting setup. A USB update may be required.");
+          if (device.pendingCommandId || (Number.isSafeInteger(active?.startedAtMs) && Number.isFinite(active?.durationSeconds) &&
+              active.durationSeconds > 0 && active.startedAtMs + active.durationSeconds * 1000 > time)) fail("failed-precondition", "Wait until the device has no active or pending hold before restarting setup.");
+        }
         if (data.action === "grantAdmin") tx.set(adminRef(email), {email, grantedBy: identity.uid, grantedAtMs: time});
         if (data.action === "revokeAdmin") tx.delete(adminRef(email));
-        if (deviceRef) {
+        if (data.action === "restartSetup") {
+          tx.update(deviceRef, {enabled: false, setupReset: {id: audit.path.split("/").pop(), state: "pending", requestedAtMs: time, actor: identity.uid}});
+        } else if (deviceRef) {
           const sequence = (device.firmwareTarget?.sequence || 0) + 1;
           if (!Number.isSafeInteger(sequence)) fail("failed-precondition", "Deployment sequence exhausted.");
           tx.update(deviceRef, {firmwareTarget: {version: release ? data.version : null, sequence, enabled: !!release}});

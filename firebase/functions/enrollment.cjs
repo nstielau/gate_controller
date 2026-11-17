@@ -3,6 +3,18 @@ const {userId, fail} = require("./controller.cjs");
 
 const DEVICE_ID = /^[a-z0-9-]{1,64}$/;
 const HEX_SECRET = /^[0-9a-f]{64}$/;
+const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+function validVersion(value) {
+  return typeof value === "string" && value.length <= 32 && VERSION.test(value) && value.split(".").every(part => Number.isSafeInteger(Number(part)));
+}
+function supportsRestartSetupVersion(value) {
+  if (!validVersion(value)) return false;
+  const [major, minor, patch] = value.split(".").map(Number);
+  return major > 1 || (major === 1 && (minor > 0 || patch >= 13));
+}
+function exactDeviceTopics(device, id) {
+  return device?.commandTopic === `gate/v1/devices/${id}/command` && device?.statusTopic === `gate/v1/devices/${id}/status`;
+}
 const CLAIM_MS = 2 * 60 * 60 * 1000;
 const PROVISIONING_LEASE_MS = 2 * 60 * 1000;
 const DEFAULT_BROKER_HOST = "jd3a6164.ala.us-east-1.emqxsl.com";
@@ -64,6 +76,16 @@ function createEnrollment({db, broker, now = Date.now, randomBytes = cryptoRando
   function ownedResult(id, enrollment) {
     return {deviceId: id, state: enrollment?.state === "ready" ? "provisioning" : "registered", owned: true};
   }
+  function resetAccess(device, id, uid) {
+    return exactDeviceTopics(device, id) && Array.isArray(device.allowedUsers) && device.allowedUsers.includes(uid);
+  }
+  function activeReset(device) {
+    return device?.setupReset && device.setupReset.state !== "complete";
+  }
+  function currentResetClaim(claim, device, resetId, time, requireFresh = true) {
+    return claim && claim.setupResetId === resetId && ["pending", "provisioning", "registered"].includes(claim.state) &&
+      Array.isArray(device.allowedUsers) && device.allowedUsers.includes(claim.uid) && (!requireFresh || claim.expiresAtMs > time);
+  }
   async function claim(request) {
     const uid = userId(request);
     const id = normalizeDeviceId(request?.data?.deviceId);
@@ -74,6 +96,18 @@ function createEnrollment({db, broker, now = Date.now, randomBytes = cryptoRando
     return db.runTransaction(async tx => {
       const [deviceDoc, current, enrollmentDoc, binding] = await tx.getAll(deviceRef(id), claimRef(key), enrollmentRef(id), bindingRef(id));
       const device = deviceDoc.data(), enrollment = enrollmentDoc.data();
+      if (deviceDoc.exists && activeReset(device)) {
+        if (!resetAccess(device, id, uid) || !bindingMatches(binding, code)) fail("failed-precondition", "This device is already registered.");
+        const reset = device.setupReset;
+        if (reset.state === "pending") return {deviceId: id, state: "pending", owned: true};
+        if (!["awaiting_setup", "provisioning"].includes(reset.state) || !enrollment || enrollment.claimKey !== key) fail("failed-precondition", "Device registration is unavailable.");
+        const record = current.data();
+        if (currentResetClaim(record, device, reset.id, time)) return claimResult(id, record);
+        const next = {uid, deviceId: id, nickname: null, setupResetId: reset.id,
+          state: reset.state === "provisioning" ? "provisioning" : "pending", createdAtMs: time, expiresAtMs: time + CLAIM_MS};
+        tx.set(claimRef(key), next);
+        return claimResult(id, next);
+      }
       if (deviceDoc.exists) {
         if (!ownedDevice(id, device, enrollment, uid)) fail("failed-precondition", "This device is already registered.");
         return ownedResult(id, enrollment);
@@ -101,6 +135,14 @@ function createEnrollment({db, broker, now = Date.now, randomBytes = cryptoRando
     const key = hash(id + ":" + code);
     return db.runTransaction(async tx => {
       const [claimDoc, deviceDoc, enrollmentDoc, binding] = await tx.getAll(claimRef(key), deviceRef(id), enrollmentRef(id), bindingRef(id));
+      if (deviceDoc.exists && activeReset(deviceDoc.data())) {
+        const device = deviceDoc.data(), reset = device.setupReset;
+        if (!resetAccess(device, id, uid) || !bindingMatches(binding, code)) return {deviceId: id, state: "unknown"};
+        if (reset.state === "pending") return {deviceId: id, state: "pending", owned: true};
+        const record = claimDoc.data();
+        if (!currentResetClaim(record, device, reset.id, now(), false)) return {deviceId: id, state: "awaiting_setup", owned: true};
+        return record.expiresAtMs <= now() ? {deviceId: id, state: "expired", expiresAtMs: record.expiresAtMs} : claimResult(id, record);
+      }
       if (deviceDoc.exists) {
         return ownedDevice(id, deviceDoc.data(), enrollmentDoc.data(), uid) ? ownedResult(id, enrollmentDoc.data()) : {deviceId: id, state: "unknown"};
       }
@@ -114,7 +156,9 @@ function createEnrollment({db, broker, now = Date.now, randomBytes = cryptoRando
     const id = normalizeDeviceId(request?.device_id ?? request?.deviceId);
     const secret = proof(request?.device_secret ?? request?.deviceSecret);
     const action = request?.action ?? "provision";
-    if (!["provision", "complete"].includes(action)) fail("invalid-argument", "Invalid registration action.");
+    if (!["provision", "complete", "maintenance", "restart_setup_complete"].includes(action)) fail("invalid-argument", "Invalid registration action.");
+    if (request?.setup_reset_id !== undefined && !HEX_SECRET.test(request.setup_reset_id)) fail("invalid-argument", "Invalid setup reset.");
+    if (action === "maintenance" && (!validVersion(request.app_version) || !supportsRestartSetupVersion(request.base_version))) fail("failed-precondition", "Compatible device firmware is required.");
     // The QR contains hash(secret), never the private proof or encryption key.
     const code = hash(secret);
     const key = hash(id + ":" + code);
@@ -125,12 +169,50 @@ function createEnrollment({db, broker, now = Date.now, randomBytes = cryptoRando
       if (!bindingMatches(binding, code)) fail("failed-precondition", "Device registration is unavailable.");
       let record = enrollmentDoc.exists ? enrollmentDoc.data() : null;
       if (record && record.claimKey !== key) fail("failed-precondition", "Device registration is unavailable.");
+      const device = deviceDoc.data(), reset = device?.setupReset;
+      if (["maintenance", "restart_setup_complete"].includes(action)) {
+        if (!record || !deviceDoc.exists || !exactDeviceTopics(device, id) || !["registered", "awaiting_setup", "ready"].includes(record.state)) fail("failed-precondition", "Device registration is unavailable.");
+        decrypt(record.envelope, secret, context);
+        if (action === "maintenance") {
+          tx.update(deviceRef(id), {maintenance: {appVersion: request.app_version, baseVersion: request.base_version, lastSeenAtMs: time, supportsRestartSetup: true}});
+          return {response: {deviceId: id, restartSetup: reset ? {id: reset.id, state: reset.state} : null}};
+        }
+        if (!reset || reset.id !== request.setup_reset_id || !["pending", "awaiting_setup"].includes(reset.state)) fail("failed-precondition", "Device registration is unavailable.");
+        if (reset.state === "pending") {
+          tx.update(deviceRef(id), {enabled: false, enrollmentState: "awaiting_setup", setupReset: {...reset, state: "awaiting_setup", acknowledgedAtMs: time}});
+          tx.update(enrollmentRef(id), {state: "awaiting_setup", setupResetId: reset.id});
+          if (claimDoc.exists) tx.update(claimRef(key), {state: "expired", expiresAtMs: time});
+        }
+        return {response: {deviceId: id, state: "awaiting_setup", setup_reset_id: reset.id}};
+      }
+      // Every subsequent generation must carry its ID, including transport retries
+      // after completion. A delayed pre-reset request cannot skip Wi-Fi/QR setup.
+      if (reset) {
+        if (request.setup_reset_id !== reset.id || !exactDeviceTopics(device, id) || reset.state === "pending") fail("failed-precondition", "Device registration is unavailable.");
+        if (action === "provision" && ["awaiting_setup", "provisioning"].includes(reset.state)) {
+          if (!record || record.setupResetId !== reset.id || !["awaiting_setup", "ready"].includes(record.state) ||
+              !currentResetClaim(claimDoc.data(), device, reset.id, time)) fail("failed-precondition", "Device registration is unavailable.");
+          const credentials = decrypt(record.envelope, secret, context);
+          if (reset.state === "awaiting_setup") {
+            tx.update(enrollmentRef(id), {state: "ready"});
+            tx.update(deviceRef(id), {enrollmentState: "provisioning", setupReset: {...reset, state: "provisioning", provisioningAtMs: time}});
+          }
+          tx.update(claimRef(key), {state: "provisioning"});
+          return {credentials};
+        }
+        if (action === "complete" && reset.state !== "complete" &&
+            (reset.state !== "provisioning" || record?.setupResetId !== reset.id || !currentResetClaim(claimDoc.data(), device, reset.id, time, false))) fail("failed-precondition", "Device registration is unavailable.");
+      } else if (request.setup_reset_id !== undefined) {
+        fail("failed-precondition", "Device registration is unavailable.");
+      }
       if (action === "complete") {
         if (!record || !["ready", "registered"].includes(record.state) || !deviceDoc.exists) fail("failed-precondition", "Device registration is unavailable.");
         // Decrypt before accepting proof, including repeated acknowledgments.
         decrypt(record.envelope, secret, context);
         if (record.state === "ready") {
-          tx.update(deviceRef(id), {enabled: true, enrollmentState: "registered", registeredAtMs: time});
+          if (reset && (reset.state !== "provisioning" || device.enrollmentState !== "provisioning")) fail("failed-precondition", "Device registration is unavailable.");
+          tx.update(deviceRef(id), {enabled: true, enrollmentState: "registered", registeredAtMs: time,
+            ...(reset ? {setupReset: {...reset, state: "complete", completedAtMs: time}} : {})});
           tx.update(enrollmentRef(id), {state: "registered", registeredAtMs: time});
           tx.update(claimRef(key), {state: "registered", registeredAtMs: time});
         }
@@ -154,6 +236,7 @@ function createEnrollment({db, broker, now = Date.now, randomBytes = cryptoRando
       tx.update(claimRef(key), {state: "provisioning"});
       return {credentials, provision: true};
     });
+    if (reservation.response) return reservation.response;
     if (reservation.complete) return {deviceId: id, state: "registered"};
     if (!reservation.provision) return reservation.credentials;
     const {username, password, commandTopic, statusTopic} = reservation.credentials;
@@ -198,7 +281,8 @@ function createRegistrationHandler(service) {
     if (request.method !== "POST") return response.status(405).json({error: "method_not_allowed"});
     try {
       const body = request.body && typeof request.body === "object" ? request.body : {};
-      const result = await service.register({device_id: body.device_id ?? body.deviceId, device_secret: body.device_secret, action: body.action});
+      const result = await service.register({device_id: body.device_id ?? body.deviceId, device_secret: body.device_secret, action: body.action,
+        setup_reset_id: body.setup_reset_id, app_version: body.app_version, base_version: body.base_version});
       return response.status(200).json(result);
     } catch (error) {
       const status = error?.publicCode === "unavailable" ? 503 : 400;
@@ -206,4 +290,4 @@ function createRegistrationHandler(service) {
     }
   };
 }
-module.exports = {createEnrollment, createRegistrationHandler, normalizeDeviceId, CLAIM_MS, PROVISIONING_LEASE_MS};
+module.exports = {createEnrollment, createRegistrationHandler, normalizeDeviceId, CLAIM_MS, PROVISIONING_LEASE_MS, supportsRestartSetupVersion};

@@ -115,9 +115,15 @@ class OutputTests(unittest.TestCase):
         self.assertEqual(
             self.app.display.show_status.call_args_list,
             [
-                call(wifi=False, mqtt=False, hold=True, remaining_seconds=60),
-                call(wifi=False, mqtt=False, hold=True, remaining_seconds=59),
-                call(wifi=False, mqtt=False, hold=False, remaining_seconds=0),
+                call(
+                    wifi=False, mqtt=False, hold=True, remaining_seconds=60, next_boot_setup=False
+                ),
+                call(
+                    wifi=False, mqtt=False, hold=True, remaining_seconds=59, next_boot_setup=False
+                ),
+                call(
+                    wifi=False, mqtt=False, hold=False, remaining_seconds=0, next_boot_setup=False
+                ),
             ],
         )
 
@@ -173,14 +179,22 @@ class OutputTests(unittest.TestCase):
                 self.app.main()
         self.assertEqual(
             [c.args[0] for c in self.app.digitalio.DigitalInOut.call_args_list],
-            [self.app.board.D11, self.app.board.D5, self.app.board.D6, self.app.board.D9],
+            [
+                self.app.board.D11,
+                self.app.board.D5,
+                self.app.board.D6,
+                self.app.board.D9,
+                self.app.board.D0,
+                self.app.board.D1,
+                self.app.board.D2,
+            ],
         )
         self.assertNotIn(
             self.app.board.D10, [c.args[0] for c in self.app.digitalio.DigitalInOut.call_args_list]
         )
         self.assertEqual(gate.switch_to_output.call_count, 4)
         self.assertFalse(gate.value)
-        self.assertEqual(gate.deinit.call_count, 4)
+        self.assertEqual(gate.deinit.call_count, 7)
         self.assertFalse(self.app.led.value)
 
     def test_feather_startup_diagnostic_never_claims_buttons(self):

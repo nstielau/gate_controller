@@ -50,6 +50,17 @@ Firmware cards show the last reported app/base pair, separately from the assigne
 target. Older boards show “Base not reported” until their USB bootstrap supports
 independent reporting. See [OTA operations](../docs/ota-operations.md).
 
+
+Compatible registered boards also offer **Restart setup** in Administration.
+Confirming disables new web commands and queues a reset; an offline board waits
+until it reconnects. An active or pending hold blocks the request, and the board
+checks its own hold lease before acknowledging. After the board acknowledges,
+its Wi-Fi setup portal opens. Add Wi-Fi, scan the registration QR and register
+with an account that already has access. Identity, nickname, access and command
+history are preserved. This requires USB base 1.0.13 or newer and a trusted
+pairing enrollment; it does not require OTA. The browser polls progress while
+open and never automatically retries the reset mutation.
+
 ## Architecture and behavior
 
 New USB boards use a private NVM pairing proof and a derived SHA-256 code in

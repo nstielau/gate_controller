@@ -85,6 +85,7 @@ function openOnboarding(focus = true) {
 }
 function claimStatusMessage(status) {
   if (status.state === "pending") return "Waiting for the device to start registration…";
+  if (status.state === "awaiting_setup") return "Set up Wi-Fi on the device, then scan its QR code.";
   if (status.state === "provisioning") return "Setting up the device. Waiting for it to confirm connection…";
   if (status.state === "registered") return "Device confirmed registration. Loading access…";
   if (status.state === "expired") return "This registration expired. Register again or scan a fresh QR code.";

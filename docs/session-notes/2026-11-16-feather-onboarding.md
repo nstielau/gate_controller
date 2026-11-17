@@ -104,3 +104,25 @@ mobile portal controls and close-before-restart behavior. Wait for serial/REPL
 operations to finish, use DTR/RTS settings from the console helper, and validate
 CircuitPython APIs on the device. Keep software evidence distinct from electrical
 and physical validation.
+
+## Restart setup and physical shortcuts
+
+Base 1.0.13 adds D0/D1 website QR shortcuts (press again or wait 20 seconds),
+and D2 selects the next reboot's Normal/Wi-Fi setup action on the bottom row.
+Selection is one-shot and does not reboot immediately. The QR shortcut has no
+pairing intent; onboarding retains its separate secure QR. D1 held at startup
+remains recovery. Buttons do not alter the local hold lease.
+
+Administration can explicitly restart setup for compatible registered boards.
+The server disables new commands and the idle board acknowledges a unique reset
+before clearing local network settings. Wi-Fi setup and a fresh owner QR claim
+then replay the existing encrypted broker identity. Device ownership, access,
+nickname and audit records survive. This is for retesting, not ownership transfer
+or broker credential rotation. Power loss/lost responses resume the same reset.
+
+USB base 1.0.13 was installed on 37cc02 with app 1.0.1/CP 10.3.2. Native QR,
+label caching/bounds and input polarity checks passed; the board reconnected.
+Validation passed 113 host tests, all pre-commit checks, 46 web/backend unit
+tests, 83 browser tests (one existing skip) and 27 local Firestore tests. The
+production restart-setup/owner registration cycle still needs an interactive
+user test. No production reset, new gate hold or ownership change was issued.

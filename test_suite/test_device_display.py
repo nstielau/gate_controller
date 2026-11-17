@@ -33,25 +33,45 @@ class DisplayTests(unittest.TestCase):
             renderer.show_status(wifi=True, mqtt=True, hold=False, remaining_seconds=0)
             group = display.root_group
             values = [item for item in group if hasattr(item, "text")]
-            footer = next(item for item in values if item.text == "D1 + RESET: Wi-Fi setup")
+            footer = next(item for item in values if item.text == "Reboot: Normal (D2)")
             hold = next(item for item in values if item.text == "OFF")
             self.assertLessEqual(footer.y + 6, 134)
             renderer.show_status(wifi=False, mqtt=False, hold=True, remaining_seconds=272)
             self.assertIs(display.root_group, group)
             self.assertEqual(hold.text, "04:32")
-            self.assertEqual(footer.text, "Reset ends hold")
+            self.assertEqual(footer.text, "Reboot: Normal (D2) | ends hold")
             self.assertEqual(hold.color, 0x173F35)
             renderer.show_status(wifi=False, mqtt=False, hold=True, remaining_seconds=271)
             self.assertEqual(hold.text, "04:31")
             renderer.show_status(wifi=True, mqtt=True, hold=False, remaining_seconds=0)
             self.assertEqual(hold.text, "OFF")
-            self.assertEqual(footer.text, "D1 + RESET: Wi-Fi setup")
+            self.assertEqual(footer.text, "Reboot: Normal (D2)")
             bitmap.assert_called_once()
             renderer.show_setup("Gate-Setup-test")
             renderer.show_status(wifi=True, mqtt=True, hold=True, remaining_seconds=3600)
             self.assertIsNot(display.root_group, group)
             self.assertEqual(bitmap.call_count, 2)
             self.assertIn("1:00:00", [item.text for item in display.root_group if hasattr(item, "text")])
+
+    def test_website_qr_has_no_pairing_intent_and_keeps_live_footer(self):
+        display = SimpleNamespace(width=240, height=135, root_group=None)
+        labels = MagicMock(side_effect=lambda font, **kwargs: SimpleNamespace(**kwargs))
+        bitmap = MagicMock(side_effect=lambda *args: {})
+        drawing = SimpleNamespace(Group=list, Bitmap=bitmap, Palette=lambda *args: {}, TileGrid=MagicMock())
+        text = SimpleNamespace(label=SimpleNamespace(Label=labels))
+        renderer = module.ReverseTFT(display, "ab12cd")
+        with patch.dict(sys.modules, {"displayio": drawing, "terminalio": SimpleNamespace(FONT=None), "adafruit_display_text": text}), patch.object(module, "qr_matrix", return_value=[[False]*41 for _ in range(41)]) as qr:
+            renderer.show_website(hold=True, remaining_seconds=65, next_boot_setup=False)
+            group = display.root_group
+            renderer.show_website(hold=True, remaining_seconds=64, next_boot_setup=True)
+            self.assertIs(display.root_group, group)
+            qr.assert_called_once_with(module.APP_URL)
+            strings = [item.text for item in group if hasattr(item, "text")]
+            self.assertIn("01:04", strings)
+            self.assertIn("Reboot: Wi-Fi setup (D2) | ends hold", strings)
+            self.assertIn("Scan to open", strings)
+            renderer.show_status(next_boot_setup=True)
+            self.assertIsNot(display.root_group, group)
 
     def test_registration_qr_url_contains_only_device_id(self):
         url = module.registration_qr_url("AB12CD")

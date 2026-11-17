@@ -17,6 +17,10 @@ def format_hold_time(seconds):
     return "{:02d}:{:02d}".format(minutes, seconds)
 
 
+def reboot_footer(next_boot_setup=False, hold=False):
+    return ("Reboot: Wi-Fi setup (D2)" if next_boot_setup else "Reboot: Normal (D2)") + (" | ends hold" if hold else "")
+
+
 def registration_qr_url(device_id, code=None):
     device_id = normalize_device_id(device_id)
     if code is None:
@@ -70,6 +74,7 @@ class ReverseTFT:
         self.state = DisplayState(device_id)
         self.group = None
         self._status_labels = None
+        self._website_labels = None
 
     @classmethod
     def from_board(cls, device_id):
@@ -84,6 +89,7 @@ class ReverseTFT:
             self.display.root_group = group
             self.group = group
             self._status_labels = None
+            self._website_labels = None
 
     def show_boot(self):
         if self.display is None:
@@ -158,14 +164,78 @@ class ReverseTFT:
     def show_registration(self, phase, code):
         self.show_qr(code, phase)
 
-    def show_status(self, wifi=False, mqtt=False, hold=False, remaining_seconds=None):
+    def show_notice(self, title, detail):
+        if self.display is None:
+            return
+        try:
+            import displayio
+            import terminalio
+            from adafruit_display_text import label
+            group = displayio.Group()
+            for text, y in (("DRAWBRIDGE", 20), (title, 55), (detail, 85)):
+                group.append(label.Label(terminalio.FONT, text=text, color=0xFFFFFF, x=4, y=y))
+            self._show_group(group)
+        except (ImportError, AttributeError, RuntimeError, ValueError):
+            return
+
+    def show_website(self, hold=False, remaining_seconds=None, next_boot_setup=False):
+        if self.display is None:
+            return
+        hold_text = (format_hold_time(remaining_seconds) if remaining_seconds is not None else "ON") if hold else "OFF"
+        footer = reboot_footer(next_boot_setup, hold)
+        try:
+            if self._website_labels is not None and self.display.root_group is self.group:
+                for key, value in (("hold", hold_text), ("footer", footer)):
+                    if self._website_labels[key].text != value:
+                        self._website_labels[key].text = value
+                return
+            import displayio
+            import terminalio
+            from adafruit_display_text import label
+            matrix = qr_matrix(APP_URL)
+            size = len(matrix)
+            scale = max(1, min(3, (self.display.height - 39) // size))
+            width = size * scale
+            background = displayio.Bitmap(self.display.width, self.display.height, 1)
+            cream = displayio.Palette(1)
+            cream[0] = 0xF3F4EB
+            group = displayio.Group()
+            group.append(displayio.TileGrid(background, pixel_shader=cream))
+            bitmap = displayio.Bitmap(width, width, 2)
+            palette = displayio.Palette(2)
+            palette[0], palette[1] = 0xFFFFFF, 0x000000
+            for y, row in enumerate(matrix):
+                for x, dark in enumerate(row):
+                    if dark:
+                        for dy in range(scale):
+                            for dx in range(scale):
+                                bitmap[x * scale + dx, y * scale + dy] = 1
+            qr_x = self.display.width - width - 4
+            group.append(displayio.TileGrid(bitmap, pixel_shader=palette, x=qr_x, y=17))
+            group.append(label.Label(terminalio.FONT, text="Scan to open", color=0x173F35,
+                                     anchor_point=(0.5, 0.5), anchored_position=(qr_x + width // 2, 7)))
+            for text, y, scale in (("Drawbridge", 14, 2), (self.state.device_id, 40, 1),
+                                   ("Hold", 66, 1), ("D0/D1: back", 113, 1)):
+                group.append(label.Label(terminalio.FONT, text=text, color=0x173F35, x=4, y=y, scale=scale))
+            values = {
+                "hold": label.Label(terminalio.FONT, text=hold_text, color=0x173F35, x=4, y=88, scale=2),
+                "footer": label.Label(terminalio.FONT, text=footer, color=0x66736B, x=4, y=128),
+            }
+            for value in values.values():
+                group.append(value)
+            self._show_group(group)
+            self._website_labels = values
+        except (ImportError, AttributeError, RuntimeError, ValueError):
+            return
+
+    def show_status(self, wifi=False, mqtt=False, hold=False, remaining_seconds=None, next_boot_setup=False):
         if self.display is None:
             return
         hold_text = (format_hold_time(remaining_seconds) if remaining_seconds is not None else "ON") if hold else "OFF"
         rows = (("Wi-Fi", "Connected" if wifi else "Connecting", wifi, 49),
                 ("MQTT", "Connected" if mqtt else "Reconnecting", mqtt, 78),
                 ("Hold", hold_text, hold, 107))
-        footer = "Reset ends hold" if hold else "D1 + RESET: Wi-Fi setup"
+        footer = reboot_footer(next_boot_setup, hold)
         try:
             if self._status_labels is not None and self.display.root_group is self.group:
                 for title, value, active, _ in rows:
