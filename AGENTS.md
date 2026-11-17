@@ -399,3 +399,8 @@
   snapshot/worktree avoids unrelated scratch files; never delete or commit user
   scratch to satisfy the release guard. Physical power-loss/recovery qualification
   must be reported separately from simulated torn writes or watchdog resets.
+
+- Feather 37cc02 has USB base 1.0.15/app 1.1.0 installed, with approved OTA
+  release 1.1.0 confirmed at sequence 6. Physical D1 recovery and local
+  syntax/UI/watchdog rollback passed; see `docs/feather-ota-bench-validation.md`.
+  Physical power-loss and real Feather hold/update qualification remain pending.

@@ -330,3 +330,10 @@ watchdog crash remains an inherent reset boundary. Coordinated Restart setup
 waits for trial resolution. A previously durable pending setup reset suppresses
 OTA/watchdog startup and resumes its ACK first. Reset setup preserves the OTA
 settings, confirmed slot, journals and sequence floor.
+
+Feather bench evidence is in the
+[2026-11-16 validation record](feather-ota-bench-validation.md).
+Device 37cc02 confirmed release 1.1.0, recovered from local syntax/UI/watchdog
+faults and passed physical D1 recovery. Physical power interruption and real
+Feather hold/update qualification remain outstanding; do not infer them from
+host simulations, low-output logs or reset tests.
