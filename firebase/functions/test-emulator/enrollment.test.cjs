@@ -234,3 +234,27 @@ test("overlapping commands cannot hide an earlier pending publish from restart s
   await assert.rejects(controller.holdGate(hold), {publicCode: "permission-denied"});
   assert.equal(publishes, 1);
 });
+
+test("known board metadata persists through private maintenance and OTA reports and only newest snapshot reaches observation", async () => {
+  const f = await resetFixture(), feather = "adafruit_feather_esp32s3_reverse_tft", xiao = "seeed_xiao_esp32_s3_sense";
+  f.advance(1);
+  await f.api.register({...f.maintenance, base_version: "1.0.15", board_id: feather});
+  assert.equal((await f.ref.get()).data().maintenance.boardId, feather);
+  let view = (await f.admin.overview({auth: f.adminAuth})).devices.find(device => device.id === f.id);
+  assert.equal(view.observation.boardId, feather);
+  assert.equal(view.maintenance.boardId, feather);
+  const {createDeviceService} = require("../administration.cjs"), service = createDeviceService(db, () => f.time);
+  f.advance(1);
+  await service.report(f.id, {state: "current", version: "1.1.0", base_version: "1.0.15", board_id: xiao, sequence: 3});
+  assert.equal((await f.ref.get()).data().reportedFirmware.board_id, xiao);
+  view = (await f.admin.overview({auth: f.adminAuth})).devices.find(device => device.id === f.id);
+  assert.equal(view.observation.boardId, xiao);
+  await assert.rejects(f.api.register({...f.maintenance, board_id: "unknown"}), {publicCode: "invalid-argument"});
+  await assert.rejects(service.report(f.id, {state: "current", version: "1.1.0", board_id: "unknown", sequence: 3}), {publicCode: "invalid-argument"});
+  f.advance(1);
+  await service.report(f.id, {state: "current", version: "1.1.0", sequence: 4});
+  view = (await f.admin.overview({auth: f.adminAuth})).devices.find(device => device.id === f.id);
+  assert.equal(view.observation.boardId, null);
+  assert.equal(view.observation.baseVersion, null);
+  assert.equal((await f.ref.get()).data().reportedFirmware.board_id, undefined);
+});

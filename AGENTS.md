@@ -190,8 +190,8 @@
   D11/GPIO11, Wi-Fi D5/GPIO5, MQTT D6/GPIO6 and Hold D9/GPIO9. These match
   J2 pins 6/10/9/8 in `hardware/featherwing/generate.py`. D0/D1/D2 are buttons;
   never drive them as indicator outputs. Feather onboard LED is active HIGH.
-  The following D10/D0/D1/D2 mapping applies to XIAO. Feather OTA remains
-  unsupported. J3 is open collector: active control sinks OUT_OC to GND and
+  The following D10/D0/D1/D2 mapping applies to XIAO. Feather OTA requires
+  explicit enrollment/opt-in and uses D1 held at hard reset for USB recovery. J3 is open collector: active control sinks OUT_OC to GND and
   does not provide a HIGH output voltage. Use `TEST_ARGS='--hold-pin D9'` with
   passive hardware checks on Feather.
 
@@ -338,7 +338,9 @@
 
 - Read `docs/ota-operations.md` for actual behavior; `docs/ota-upgrades.md` is
   the earlier proposal. OTA is disabled until USB enrollment and explicit opt-in.
-  The first implementation is XIAO ESP32S3/CP10 only; do not infer Feather support.
+  Supported opt-in platforms are XIAO ESP32S3 and Reverse TFT Feather on CP10
+  after USB base 1.0.15. API2 releases require loader 1.1.0, matching enrolled/
+  reported board and latest reported base >=1.0.15. Legacy API1 stays XIAO-only.
 - `drawbridge.py` owns application policy; `code.py` owns physical hold leases,
   networking and loader. OTA must never replace root `drawbridge.py`, `boot.py`,
   `code.py`, libraries, or certificates. `/ota/app0.py` and `app1.py` plus two
@@ -373,3 +375,27 @@
 - Release tools require a clean tagged commit and verified GitHub release
   bytes; mirrors are create-only in a private bucket. Target only approved
   manifests. Reassigning an older app must use a newer deployment sequence.
+
+
+# Feather OTA and thin base (1.0.15 / app API2)
+
+- `drawbridge.py` owns TFT renderers and button/view policy as well as command
+  policy/indicators. `device_display.py` is only the root recovery app import
+  shim; future UI edits belong in the app. Base owns all pin sampling/writes,
+  physical leases, credentials, network/provisioning and loader/rollback.
+- Opt-in/enrollment/approved release assignment are per board. Publishing a
+  release never advances the fleet. API2 needs matching otaBoardId and newest
+  observation.boardId/baseVersion >=1.0.15; never infer missing metadata. Existing
+  990 Butterfield/XIAO assignments remain unchanged unless explicitly requested.
+- Feather recovery is D1 active HIGH/Pull.DOWN at hard reset; XIAO remains D9
+  active LOW/Pull.UP. Never sample Feather D9 as recovery or bypass filesystem
+  ownership. Normal OTA mode makes host CIRCUITPY read-only.
+- Rendering/button app errors must reach rollback handling; handle expected NVM
+  save errors inside the protected Platform operation. Trial timeout cannot
+  deliberately restart an active hold. Defer Restart setup during trials and
+  suppress OTA/watchdog on a durable pending setup-reset boot. Preserve OTA
+  settings, confirmed slot, journals and sequence floor across setup restart.
+- Build releases from a clean tagged committed checkout. A separate clean
+  snapshot/worktree avoids unrelated scratch files; never delete or commit user
+  scratch to satisfy the release guard. Physical power-loss/recovery qualification
+  must be reported separately from simulated torn writes or watchdog resets.

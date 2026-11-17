@@ -8,13 +8,37 @@ from unittest.mock import MagicMock, patch
 
 sys.path.append(str(pathlib.Path(__file__).parents[1] / "circuitpython" / "lib"))
 
-MODULE_PATH = pathlib.Path(__file__).parents[1] / "circuitpython" / "lib" / "device_display.py"
-spec = importlib.util.spec_from_file_location("device_display", MODULE_PATH)
+MODULE_PATH = pathlib.Path(__file__).parents[1] / "circuitpython" / "drawbridge.py"
+spec = importlib.util.spec_from_file_location("ota_display", MODULE_PATH)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 
 class DisplayTests(unittest.TestCase):
+    def test_ota_app_owns_button_view_timeout_and_uses_only_protected_setup_action(self):
+        platform=MagicMock()
+        ui=module.create_app(platform,0).create_ui(None,"ab12cd")
+        ui.display=MagicMock()
+        ui.on_button(0,100)
+        ui.render_status(101,hold=True,remaining_seconds=10)
+        ui.render_status(101.1,hold=True,remaining_seconds=10)
+        ui.display.show_website.assert_called_once()
+        ui.on_button(2,102)
+        platform.toggle_setup_reboot.assert_called_once()
+        platform.request_hold.assert_not_called()
+        ui.render_status(120,hold=True,remaining_seconds=1,next_boot_setup=True)
+        ui.display.show_status.assert_called_once_with(wifi=False,mqtt=False,hold=True,remaining_seconds=1,next_boot_setup=True)
+
+    def test_real_renderer_errors_propagate_to_loader_instead_of_confirming_blank_ui(self):
+        display=SimpleNamespace(width=240,height=135,root_group=None)
+        ui=module.create_app(MagicMock(),0).create_ui(display,"ab12cd")
+        drawing=SimpleNamespace(Group=list,Bitmap=lambda *args:{},Palette=lambda *args:{},TileGrid=MagicMock())
+        labels=MagicMock(side_effect=RuntimeError("render_failed"))
+        text=SimpleNamespace(label=SimpleNamespace(Label=labels))
+        with patch.dict(sys.modules,{"displayio":drawing,"terminalio":SimpleNamespace(FONT=None),"adafruit_display_text":text}):
+            with self.assertRaisesRegex(RuntimeError,"render_failed"):
+                ui.render_status(1,wifi=True,mqtt=True)
+
     def test_hold_countdown_formats_seconds_and_hours(self):
         for seconds, expected in ((0, "00:00"), (1, "00:01"), (272, "04:32"),
                                   (3599, "59:59"), (3600, "1:00:00"),

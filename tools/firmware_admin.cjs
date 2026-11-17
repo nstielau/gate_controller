@@ -13,11 +13,39 @@ const {Storage} = require("../firebase/functions/node_modules/@google-cloud/stor
 const {OAuth2Client: StorageOAuth2Client} = createRequire(require.resolve("../firebase/functions/node_modules/@google-cloud/storage"))("google-auth-library");
 const {hash, OWNER, validateManifest} = require("../firebase/functions/administration.cjs");
 const ROOT = resolve(__dirname, ".."), PROJECT = "drawbridge-45487", BUCKET = PROJECT + "-firmware";
-const [action, argument] = process.argv.slice(2);
-if (!["seed-admin", "enroll", "import-release", "bucket-setup"].includes(action)) throw new Error("Usage: firmware_admin.cjs seed-admin | bucket-setup | enroll DEVICE_ID | import-release VERSION");
-if (process.env.FIRESTORE_EMULATOR_HOST || process.env.FIREBASE_AUTH_EMULATOR_HOST || process.env.STORAGE_EMULATOR_HOST) throw new Error("Unset emulators before administering production.");
+const KNOWN_BOARDS = new Set(["seeed_xiao_esp32_s3_sense", "adafruit_feather_esp32s3_reverse_tft"]);
+function enrollmentBoardId(value = "seeed_xiao_esp32_s3_sense") {
+  // An omitted BOARD_ID deliberately preserves the existing XIAO CLI workflow.
+  const boardId = value === "" ? "seeed_xiao_esp32_s3_sense" : value;
+  if (!KNOWN_BOARDS.has(boardId)) throw new Error("Set BOARD_ID to a supported CircuitPython board ID.");
+  return boardId;
+}
+async function enrollDevice({db, deviceId, boardId, folder}) {
+  if (!/^[a-z0-9-]{1,64}$/.test(deviceId || "")) throw new Error("Invalid device ID");
+  const enrolledBoard = enrollmentBoardId(boardId);
+  const ref = db.doc("devices/" + deviceId);
+  const existing = await ref.get();
+  if (!existing.exists) throw new Error("Create the device before enrollment.");
+  if (existing.data().otaCredentialHash) throw new Error("Already enrolled; explicit IAM revocation is required before rotation.");
+  mkdirSync(folder, {recursive: true, mode: 0o700});
+  const output = join(folder, deviceId + ".env"), token = randomBytes(32).toString("hex");
+  // Keep the file after an uncertain transaction: it may be the live credential.
+  // Exclusive creation also prevents replacement after an incomplete enrollment.
+  writeFileSync(output, `DEVICE_ID=${deviceId}\nBOARD_ID=${enrolledBoard}\nOTA_TOKEN=${token}\n`, {flag: "wx", mode: 0o600});
+  await db.runTransaction(async tx => {
+    const device = (await tx.get(ref)).data();
+    if (!device || device.otaCredentialHash) throw new Error("Already enrolled or device missing; explicit IAM revocation is required before rotation.");
+    tx.update(ref, {otaCredentialHash: hash(token), otaBoardId: enrolledBoard, firmwareTarget: {enabled: false, version: null, sequence: (device.firmwareTarget?.sequence || 0) + 1}});
+  });
+  return output;
+}
 const cli = (command, args) => execFileSync(command, args, {cwd: ROOT, encoding: "utf8"});
 async function main() {
+  const [action, argument] = process.argv.slice(2);
+  if (!["seed-admin", "enroll", "import-release", "bucket-setup"].includes(action)) throw new Error("Usage: firmware_admin.cjs seed-admin | bucket-setup | enroll DEVICE_ID | import-release VERSION");
+  if (process.env.FIRESTORE_EMULATOR_HOST || process.env.FIREBASE_AUTH_EMULATOR_HOST || process.env.STORAGE_EMULATOR_HOST) throw new Error("Unset emulators before administering production.");
+  const boardId = action === "enroll" ? enrollmentBoardId(process.env.BOARD_ID) : null;
+  if (action === "enroll" && !/^[a-z0-9-]{1,64}$/.test(argument || "")) throw new Error("Invalid device ID");
   if (action === "bucket-setup") {
     // Fail if the name exists elsewhere; never adopt another project's bucket.
     try {
@@ -42,18 +70,8 @@ async function main() {
       console.log("Nick is an administrator.");
     }
     if (action === "enroll") {
-      if (!/^[a-z0-9-]{1,64}$/.test(argument || "")) throw new Error("Invalid device ID");
-      const ref = db.doc("devices/" + argument);
-      if (!(await ref.get()).exists) throw new Error("Create the device before enrollment.");
-      const folder = join(ROOT, "artifacts/ota"); mkdirSync(folder, {recursive: true, mode: 0o700});
-      const output = join(folder, argument + ".env"), token = randomBytes(32).toString("hex");
-      // Exclusive creation avoids silently rotating a provisioned device.
-      writeFileSync(output, `DEVICE_ID=${argument}\nOTA_TOKEN=${token}\n`, {flag: "wx", mode: 0o600});
-      await db.runTransaction(async tx => {
-        const device = (await tx.get(ref)).data();
-        if (!device || device.otaCredentialHash) throw new Error("Already enrolled or device missing; explicit IAM revocation is required before rotation.");
-        tx.update(ref, {otaCredentialHash: hash(token), firmwareTarget: {enabled: false, version: null, sequence: (device.firmwareTarget?.sequence || 0) + 1}});
-      });
+      const output = await enrollDevice({db, deviceId: argument, boardId, folder: join(ROOT, "artifacts/ota")});
+      console.log("Enrollment board: " + boardId + (process.env.BOARD_ID ? "." : " (legacy XIAO default; specify BOARD_ID for Feather)."));
       console.log("Enrollment saved to ignored " + output + "; no target assigned. Provision over USB with make ota-provision.");
     }
     if (action === "import-release") {
@@ -91,4 +109,5 @@ async function main() {
     }
   } finally { await db.terminate(); }
 }
-main().catch(() => { console.error("Firmware administration failed. Check IAM, arguments, and local enrollment/release files; credentials are not logged."); process.exitCode = 1; });
+module.exports = {enrollmentBoardId, enrollDevice};
+if (require.main === module) main().catch(() => { console.error("Firmware administration failed. Check IAM, arguments, and local enrollment/release files; credentials are not logged."); process.exitCode = 1; });

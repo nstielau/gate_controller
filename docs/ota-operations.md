@@ -1,12 +1,12 @@
 # OTA and administrator operations
 
-The implementation is opt-in and currently targets the XIAO ESP32S3 with
-CircuitPython 10, board ID `seeed_xiao_esp32_s3_sense` (the installed
-Sense firmware build). Its D0/D1/D2/D9/D10 assignments match the documented XIAO
-header pins. Initial installation and rollback have passed physical bench
-checks; recovery and power-loss qualification is still in progress. Do not
-enable a field controller until the checklist below passes. The FeatherWing
-PCB's portable headers do not imply that these XIAO firmware pins work on a Feather.
+The implementation is opt-in for XIAO ESP32S3 (`seeed_xiao_esp32_s3_sense`)
+and Reverse TFT Feather (`adafruit_feather_esp32s3_reverse_tft`) on CircuitPython
+10. Each board is enrolled and assigned an approved version individually.
+Publishing/importing a release never advances device targets. The new Feather
+application is 1.1.0/API2 with USB base 1.0.15 and compatibility loader 1.1.0.
+Legacy XIAO API1 releases remain unchanged. Do not infer field qualification
+from host tests; current bench evidence and remaining checks are below.
 
 Device `b3640c` is enrolled and opted in (`OTA_ENABLED = 1`). It installed and
 confirmed release 1.0.0 over TLS as sequence 2. Deliberate syntax-error,
@@ -54,6 +54,11 @@ increment a deployment twice. Use Refresh after an uncertain response.
 - `boot.py` chooses USB/device filesystem ownership. USB-managed.
 - `code.py` owns provisioning, NVM, Wi-Fi/MQTT, physical output leases, loader,
   watchdog, and update scheduling. USB-managed.
+- `drawbridge.py` owns command policy, indicator schedules, TFT rendering and
+  button/view policy. API2 receives a display and a narrow protected reboot-intent
+  operation; it never owns GPIO writes or local hold deadlines. The root copy is
+  USB recovery; an OTA-selected copy supplies the normal UI. `device_display.py`
+  is only a compatibility import of root recovery helpers.
 - `lib/gate_ota.py` owns two application slots and checksummed journals.
   `lib/gate_http.py` is a bounded HTTPS client. Both are USB-managed.
 - Root `drawbridge.py` is the USB-installed recovery application. It contains
@@ -71,7 +76,8 @@ can import other modules. TLS-authenticated Firebase selects the SHA-256 of
 trusted release code. Signed manifests and independent signing-key protection
 are not implemented.
 
-D10 is initialized LOW before the temporary D0/D1/D2 diagnostic. Bootstrap
+The board-specific control output (XIAO D10 / Feather D11) is initialized LOW
+before application construction. XIAO retains its temporary D0/D1/D2 diagnostic. Bootstrap
 validates hold durations and owns the monotonic deadline. OTA starts only while
 idle; each download chunk services MQTT/outputs and aborts when a hold arrives.
 DNS/TLS/socket calls can still block briefly, as with existing MQTT connection
@@ -91,6 +97,19 @@ make ota-enroll DEVICE_ID=b3640c
 make ota-provision DEVICE_ID=b3640c
 ```
 
+For the Reverse TFT Feather, use its actual chip suffix and explicit board:
+
+```sh
+make ota-enroll DEVICE_ID=37cc02 BOARD_ID=adafruit_feather_esp32s3_reverse_tft
+make ota-provision DEVICE_ID=37cc02
+```
+
+This saves otaBoardId with the credential hash and BOARD_ID in the ignored local
+enrollment file. Provisioning rejects a board mismatch and ambient credential
+overrides. API2 assignment and serving require the enrolled board to match the
+latest authenticated board/base report, with base at least 1.0.15. Older unknown
+or missing bases cannot be inferred from a target.
+
 Use the board's actual lowercase chip suffix from its boot log. Enrollment
 creates a random per-device credential in ignored `artifacts/ota/<id>.env`
 with owner-only file permissions. Only its SHA-256 goes to Firestore. The
@@ -109,6 +128,11 @@ Then hard-reset or power-cycle the board: changing `boot.py` or filesystem
 ownership requires a full boot. With `OTA_ENABLED = 1`, `boot.py` samples D9
 (GPIO8 on this XIAO only) using its internal pull-up. **Hold D9 to GND during
 reset to enter USB-writable maintenance mode.** D9 must otherwise remain unused.
+On Feather, **hold D1 while pressing/releasing RESET** for host-writable USB
+recovery. D1 is active HIGH; D9 is the Hold LED and must never be the recovery
+input. D1 held until application startup also opens Wi-Fi setup. A short D1
+press during normal operation still opens the website QR.
+
 Normal field mode gives CircuitPython write ownership of CIRCUITPY; do not
 bypass concurrent-write protection. Maintenance mode disables OTA even if the
 setting is enabled. To disable OTA persistently, set `OTA_ENABLED = 0` via USB
@@ -284,5 +308,25 @@ J3 OUT_OC sinks toward ground during activation; it is not a voltage source
 or isolated contact. Keep physical gate-interface qualification separate.
 
 Run passive verification with `make test-hardware TEST_ARGS='--hold-pin D9'`.
-It does not publish commands or measure terminal voltage. Feather uses USB
-updates only; this mapping does not enable Feather OTA.
+It does not publish commands or measure terminal voltage. Feather supports
+OTA with USB base 1.0.15 or newer after explicit enrollment/opt-in; D1 is its
+physical recovery input. Keep software and electrical verification separate.
+
+
+## API2 compatibility and trial policy
+
+New releases include the app, OTA manifest, base ZIP and base manifest on GitHub.
+The source tar.gz GitHub generates is not the device OTA payload. API2 manifests
+use compatibility loader 1.1.0 and an explicit known-board list; the initial
+1.1.0 build targets Feather only. Each assignment creates a new per-board
+sequence. Legacy API1 remains XIAO-only/minimum loader 1.0.0. No release bytes
+or existing device targets are rewritten by this feature.
+
+Candidates carry API/board metadata in the journal. Legacy journals without it
+are API1/XIAO only. UI construction/rendering errors propagate to the loader's
+rollback path. Physical outputs are LOW before app construction and cleanup.
+An expired offline trial defers deliberate rollback/reload until idle; a
+watchdog crash remains an inherent reset boundary. Coordinated Restart setup
+waits for trial resolution. A previously durable pending setup reset suppresses
+OTA/watchdog startup and resumes its ACK first. Reset setup preserves the OTA
+settings, confirmed slot, journals and sequence floor.

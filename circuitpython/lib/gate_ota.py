@@ -11,8 +11,9 @@ import json
 import os
 
 MAX_BYTES = 65536
-BOOTSTRAP_VERSION = "1.0.0"
+BOOTSTRAP_VERSION = "1.1.0"
 BOARD_ID = "seeed_xiao_esp32_s3_sense"
+SUPPORTED_BOARDS = (BOARD_ID, "adafruit_feather_esp32s3_reverse_tft")
 
 
 def digest(data):
@@ -44,18 +45,34 @@ def version_ok(value):
 
 
 def validate_manifest(m, board_id, cp_major):
+    if type(m) is not dict:
+        raise ValueError("incompatible_manifest")
+    api = m.get("app_api_version")
+    boards = m.get("supported_board_ids")
+    compatible = (
+        api == 1
+        and m.get("minimum_bootstrap_version") == "1.0.0"
+        and board_id == BOARD_ID
+        and boards == [BOARD_ID]
+    ) or (
+        api == 2
+        and m.get("minimum_bootstrap_version") == BOOTSTRAP_VERSION
+        and board_id in SUPPORTED_BOARDS
+        and type(boards) is list
+        and 1 <= len(boards) <= len(SUPPORTED_BOARDS)
+        and all(type(value) is str and value in SUPPORTED_BOARDS for value in boards)
+        and len(set(boards)) == len(boards)
+        and board_id in boards
+    )
     if (
         type(m) is not dict
         or type(m.get("schema")) is not int
         or m["schema"] != 1
         or not version_ok(m.get("app_version"))
         or type(m.get("app_api_version")) is not int
-        or m.get("app_api_version") != 1
-        or m.get("minimum_bootstrap_version") != BOOTSTRAP_VERSION
+        or not compatible
         or cp_major != 10
         or m.get("circuitpython_major") != cp_major
-        or board_id != BOARD_ID
-        or m.get("supported_board_ids") != [BOARD_ID]
         or type(m.get("sequence")) is not int
         or not 1 <= m["sequence"] <= 9007199254740991
         or type(m.get("size")) is not int
@@ -65,7 +82,9 @@ def validate_manifest(m, board_id, cp_major):
         or any(c not in "0123456789abcdef" for c in m["sha256"])
     ):
         raise ValueError("incompatible_manifest")
-    return {k: m[k] for k in ("app_version", "sequence", "size", "sha256")}
+    result = {k: m[k] for k in ("app_version", "sequence", "size", "sha256", "app_api_version")}
+    result["board_id"] = board_id
+    return result
 
 
 class UpdateStore:

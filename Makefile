@@ -117,7 +117,7 @@ ota-bucket-setup:
 
 ota-enroll:
 	@test -n "$(DEVICE_ID)" || (echo 'Set DEVICE_ID'; exit 1)
-	node_modules/.bin/node tools/firmware_admin.cjs enroll "$(DEVICE_ID)"
+	BOARD_ID="$(BOARD_ID)" node_modules/.bin/node tools/firmware_admin.cjs enroll "$(DEVICE_ID)"
 
 ota-provision:
 	@test -n "$(DEVICE_ID)" || (echo 'Set DEVICE_ID'; exit 1)

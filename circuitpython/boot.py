@@ -1,8 +1,7 @@
-"""USB-installed OTA ownership. Default is normal USB-writable maintenance.
+"""USB/device filesystem ownership with board-specific physical recovery.
 
-OTA_ENABLED=1 opts in on XIAO ESP32S3 only. Ground D9 during a hard reset to
-recover USB write access. D9 is GPIO8 on this board; other boards fail closed.
-Never enable concurrent host/device filesystem writes.
+Opt in explicitly. Feather D1 HIGH at hard reset or XIAO D9 LOW recovers USB
+write access. Never enable concurrent host/device filesystem writes.
 """
 
 import os
@@ -11,13 +10,19 @@ import digitalio
 import storage
 
 mode = "usb"
-# CircuitPython 10.1+ returns strings from getenv, including TOML integers.
-if os.getenv("OTA_ENABLED") in (1, "1") and board.board_id == "seeed_xiao_esp32_s3_sense":
-    with digitalio.DigitalInOut(board.D9) as recovery:
-        recovery.switch_to_input(pull=digitalio.Pull.UP)
-        if recovery.value:
-            storage.remount("/", readonly=False)
-            mode = "ota"
-        else:
-            mode = "maintenance"
+if os.getenv("OTA_ENABLED") in (1, "1"):
+    if board.board_id == "seeed_xiao_esp32_s3_sense":
+        recovery_pin, pressed_value, pull = board.D9, False, digitalio.Pull.UP
+    elif board.board_id == "adafruit_feather_esp32s3_reverse_tft":
+        recovery_pin, pressed_value, pull = board.D1, True, digitalio.Pull.DOWN
+    else:
+        recovery_pin = None
+    if recovery_pin is not None:
+        with digitalio.DigitalInOut(recovery_pin) as recovery:
+            recovery.switch_to_input(pull=pull)
+            if bool(recovery.value) == pressed_value:
+                mode = "maintenance"
+            else:
+                storage.remount("/", readonly=False)
+                mode = "ota"
 print("GATE_BOOT mode=" + mode)

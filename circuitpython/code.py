@@ -110,10 +110,22 @@ display_last_status = None
 registration_phase = None
 ui_buttons = []
 next_boot_setup = False
-website_until = 0
+application_ui = None
 
 
 class Platform:
+    def toggle_setup_reboot(self):
+        global next_boot_setup
+        try:
+            updated = toggle_next_boot(load_config())
+            save_config(updated)
+        except (OSError, RuntimeError, ValueError):
+            log_event("button_save_failed")
+            return next_boot_setup
+        next_boot_setup = updated.get("next_boot_setup") is True
+        log_event("next_boot_selected", setup=next_boot_setup)
+        return next_boot_setup
+
     def request_hold(self, seconds, command_id, now):
         # Bootstrap validates and owns the physical output deadline independently.
         hold.apply(
@@ -132,11 +144,12 @@ class Platform:
 def initialize_application(allow_ota=True):
     global application, indicators, ota_store, ota_selected, ota_version
     global ota_trial_started, ota_state, watchdog_timer, ota_next_check
+    global application_ui, display
     factory = create_app
     if (
         allow_ota
         and os.getenv("OTA_ENABLED") in (1, "1")
-        and board.board_id == "seeed_xiao_esp32_s3_sense"
+        and board.board_id in ("seeed_xiao_esp32_s3_sense", "adafruit_feather_esp32s3_reverse_tft")
     ):
         import storage
 
@@ -154,7 +167,16 @@ def initialize_application(allow_ota=True):
                 with open(path) as source:
                     exec(source.read(), namespace)
                 if (
-                    namespace.get("APP_API_VERSION") != 1
+                    namespace.get("APP_API_VERSION") not in (1, 2)
+                    or namespace.get("APP_API_VERSION") != ota_selected.get("app_api_version", 1)
+                    or (
+                        ota_selected.get("app_api_version", 1) == 1
+                        and board.board_id != "seeed_xiao_esp32_s3_sense"
+                    )
+                    or (
+                        ota_selected.get("app_api_version", 1) == 2
+                        and ota_selected.get("board_id") != board.board_id
+                    )
                     or namespace.get("APP_VERSION") != ota_selected["app_version"]
                 ):
                     raise ValueError("invalid_app_interface")
@@ -165,6 +187,12 @@ def initialize_application(allow_ota=True):
             ota_next_check = ota_trial_started + 60 + int.from_bytes(os.urandom(1), "big")
     application = factory(Platform(), time.monotonic())
     indicators = application.indicators
+    if display is not None and hasattr(application, "create_ui"):
+        application_ui = application.create_ui(display.display, device_suffix().lower())
+        display = application_ui.display
+        display.show_boot()
+    elif ota_selected and ota_selected.get("app_api_version", 1) == 2:
+        raise ValueError("missing_app_ui_interface")
     log_event(
         "application_ready",
         version=ota_version,
@@ -192,7 +220,7 @@ def ota_service(runtime, client):
                 log_event("ota_confirmed", version=ota_version)
         else:
             ota_healthy_since = None
-        if ota_store.state["trial"] and now - ota_trial_started > 300:
+        if ota_store.state["trial"] and now - ota_trial_started > 300 and not hold.active(now):
             ota_store.rollback()
             supervisor.reload()
         return
@@ -244,6 +272,7 @@ def ota_service(runtime, client):
                 "state": ota_state,
                 "version": ota_version,
                 "base_version": BASE_VERSION,
+                "board_id": str(board.board_id),
                 "sequence": ota_selected["sequence"] if ota_selected else 0,
             },
         )
@@ -710,6 +739,7 @@ def registration_request(pool, config, action=None):
                 setup_reset_id=config.get("setup_reset_id"),
                 app_version=ota_version,
                 base_version=BASE_VERSION,
+                board_id=str(board.board_id),
             ),
             timeout=8 if action else 25,
         )
@@ -759,6 +789,8 @@ def complete_registration(pool, config):
     config.update(updated)
     display_onboarding = False
     display_last_status = None
+    if application_ui is not None:
+        application_ui.invalidate()
     log_event("registration_complete")
     return True
 
@@ -766,7 +798,7 @@ def complete_registration(pool, config):
 def check_maintenance(pool, config, client):
     """Persist reset intent before disconnecting; local leases always take priority."""
     global display_onboarding
-    if hold.active(time.monotonic()):
+    if hold.active(time.monotonic()) or (ota_store is not None and ota_store.state["trial"]):
         return False
     data = registration_request(pool, config, "maintenance")
     reset = data.get("restartSetup") if data else None
@@ -941,15 +973,10 @@ def initialize_buttons():
 
 
 def button_action(index, now):
-    global next_boot_setup, website_until
-    if index == 2:
-        # Registration may have replaced credentials since this loop started.
-        updated = toggle_next_boot(load_config())
-        save_config(updated)
-        next_boot_setup = updated.get("next_boot_setup") is True
-        log_event("next_boot_selected", setup=next_boot_setup)
-    else:
-        website_until = 0 if website_until > now else now + 20
+    if application_ui is not None:
+        application_ui.on_button(index, now)
+    elif index == 2:
+        Platform().toggle_setup_reboot()
 
 
 def service_buttons(now):
@@ -958,10 +985,7 @@ def service_buttons(now):
         if display_onboarding:
             edge.sync(pressed, now)
         elif edge.update(pressed, now):
-            try:
-                button_action(index, now)
-            except (OSError, RuntimeError, ValueError):
-                log_event("button_save_failed")
+            button_action(index, now)
 
 
 def service_outputs(runtime, online):
@@ -975,18 +999,18 @@ def service_outputs(runtime, online):
     if remaining > seconds:
         seconds += 1  # Keep 00:01 visible until the lease actually expires.
     service_buttons(now)
-    status = (
-        bool(wifi.radio.connected),
-        bool(online),
-        bool(active),
-        seconds,
-        next_boot_setup,
-        website_until > now,
-    )
-    if display is not None and not display_onboarding and status != display_last_status:
-        if status[5]:
-            display.show_website()
-        else:
+    status = (bool(wifi.radio.connected), bool(online), bool(active), seconds, next_boot_setup)
+    if not display_onboarding:
+        if application_ui is not None:
+            application_ui.render_status(
+                now,
+                wifi=status[0],
+                mqtt=status[1],
+                hold=active,
+                remaining_seconds=seconds,
+                next_boot_setup=next_boot_setup,
+            )
+        elif display is not None and status != display_last_status:
             display.show_status(
                 wifi=status[0],
                 mqtt=status[1],
@@ -1213,7 +1237,12 @@ def main():
         # Provisioning may run indefinitely; do not trial an app/start its
         # watchdog until saved Wi-Fi/MQTT settings are available.
         initialize_application(
-            allow_ota=bool(not force_setup and profiles(config) and mqtt_ready(config))
+            allow_ota=bool(
+                not force_setup
+                and profiles(config)
+                and mqtt_ready(config)
+                and not config.get("setup_reset_pending")
+            )
         )
         service_outputs(None, online=False)
         if force_setup or not profiles(config):

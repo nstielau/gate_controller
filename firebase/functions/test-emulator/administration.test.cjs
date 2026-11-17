@@ -85,7 +85,7 @@ test("device observation persists authenticated contact and version reports with
   assert.equal((await ref.get()).data().lastSeenAtMs, time);
   const getView = async () => (await f.admin.overview(f.request({}))).devices.find(d => d.id === f.id);
   let view = await getView();
-  assert.deepEqual(view.observation, {lastSeenAtMs: time, appVersion: "1.0.9", baseVersion: null, reportedAtMs: time});
+  assert.deepEqual(view.observation, {lastSeenAtMs: time, appVersion: "1.0.9", baseVersion: null, boardId: null, reportedAtMs: time});
   time += 10001;
   await service.authorize(f.id, token, "manifest");
   view = await getView();
@@ -98,4 +98,72 @@ test("device observation persists authenticated contact and version reports with
   await assert.rejects(service.authorize(f.id, "a".repeat(64), "manifest"));
   await assert.rejects(service.report(f.id, {version: "invalid", state: "current", sequence: 0}));
   assert.deepEqual((await ref.get()).data(), stored);
+});
+
+test("API2 target assignment and manifest/artifact serving enforce enrolled and newest reported board/base without advancing other targets", async () => {
+  const f = await fixture(), ref = db.doc("devices/" + f.id), feather = "adafruit_feather_esp32s3_reverse_tft", xiao = "seeed_xiao_esp32_s3_sense";
+  const version = "1.1.0", releaseRef = db.doc("firmwareReleases/" + version);
+  const release = {schema: 1, app_version: version, app_api_version: 2, minimum_bootstrap_version: "1.1.0", circuitpython_major: 10,
+    supported_board_ids: [feather], size: 100, sha256: "a".repeat(64), git_commit: "b".repeat(40), artifact_object: `firmware/${version}/${"a".repeat(64)}/drawbridge.py`, approved: true};
+  const oldTarget = {version: "1.0.9", sequence: 4, enabled: true};
+  const other = db.doc("devices/" + randomUUID());
+  await other.set({enabled: true, firmwareTarget: oldTarget});
+  await releaseRef.set(release);
+  const token = randomBytes(32).toString("hex");
+  await ref.set({enabled: true, otaCredentialHash: hash(token), firmwareTarget: oldTarget,
+    maintenance: {appVersion: "1.1.0", baseVersion: "1.0.15", boardId: feather, lastSeenAtMs: f.time}});
+  const request = f.request({action: "targetFirmware", deviceId: f.id, version});
+  // Publishing/importing a manifest by itself never advances fleet targets.
+  assert.deepEqual((await other.get()).data().firmwareTarget, oldTarget);
+  await assert.rejects(f.admin.change(request), {publicCode: "failed-precondition"});
+  for (const changes of [
+    {otaBoardId: xiao},
+    {otaBoardId: feather, maintenance: {appVersion: "1.1.0", baseVersion: "1.0.14", boardId: feather, lastSeenAtMs: f.time}},
+    {otaBoardId: feather, maintenance: {appVersion: "1.1.0", baseVersion: "1.0.15", lastSeenAtMs: f.time}},
+    {otaBoardId: feather, maintenance: {appVersion: "1.1.0", baseVersion: "1.0.15", boardId: xiao, lastSeenAtMs: f.time}},
+  ]) {
+    await ref.update(changes);
+    await assert.rejects(f.admin.change(request), {publicCode: "failed-precondition"});
+    assert.deepEqual((await ref.get()).data().firmwareTarget, oldTarget);
+  }
+  await ref.update({otaBoardId: feather, maintenance: {appVersion: "1.1.0", baseVersion: "1.0.15", boardId: feather, lastSeenAtMs: f.time}});
+  await Promise.all([f.admin.change(request), f.admin.change(request)]);
+  assert.deepEqual((await ref.get()).data().firmwareTarget, {version, sequence: 5, enabled: true});
+  assert.deepEqual((await other.get()).data().firmwareTarget, oldTarget);
+  assert.deepEqual((await releaseRef.get()).data(), release);
+  let time = f.time;
+  const service = createDeviceService(db, () => time);
+  const {createFirmwareHandler} = require("../firmware-http.cjs");
+  let downloads = 0;
+  const handler = createFirmwareHandler(service, {file() { downloads++; throw new Error("Incompatible device must not access artifacts"); }});
+  async function get(route) {
+    time += 10001;
+    const response = {code: 200, set() {}, status(code) { this.code = code; return this; }, end() { return this; }, json(body) { this.body = body; return this; }};
+    await handler({method: "GET", path: "/device-api/v1/" + route, query: {sequence: "5"}, get(key) { return {"X-Device-ID": f.id, Authorization: "Bearer " + token}[key]; }}, response);
+    return response;
+  }
+  assert.equal((await get("manifest")).body.app_api_version, 2);
+  for (const report of [{version, base_version: "1.0.14", board_id: feather}, {version, base_version: "1.0.15", board_id: xiao}, {version}]) {
+    await ref.update({reportedFirmware: {...report, atMs: f.time + 1, state: "current", sequence: 5}});
+    assert.equal((await get("manifest")).code, 204);
+    assert.equal((await get("artifact")).code, 204);
+  }
+  assert.equal(downloads, 0);
+  await ref.update({reportedFirmware: {version, base_version: "1.0.15", board_id: feather, atMs: f.time + 2, state: "current", sequence: 5}});
+  assert.equal((await get("manifest")).body.app_api_version, 2);
+  await db.doc("admins/" + hash(f.email)).delete();
+  await assert.rejects(f.admin.change({...request, data: {...request.data, requestId: randomUUID()}}), {publicCode: "permission-denied"});
+});
+test("legacy XIAO enrollment without board metadata retains API1 target and manifest behavior", async () => {
+  const f = await fixture(), ref = db.doc("devices/" + f.id), version = "1.0.0", token = randomBytes(32).toString("hex");
+  const release = {schema: 1, app_version: version, app_api_version: 1, minimum_bootstrap_version: "1.0.0", circuitpython_major: 10,
+    supported_board_ids: ["seeed_xiao_esp32_s3_sense"], size: 100, sha256: "a".repeat(64), git_commit: "b".repeat(40), artifact_object: `firmware/${version}/${"a".repeat(64)}/drawbridge.py`, approved: true};
+  await db.doc("firmwareReleases/" + version).set(release);
+  await ref.set({enabled: true, otaCredentialHash: hash(token)});
+  await f.admin.change(f.request({action: "targetFirmware", deviceId: f.id, version}));
+  const service = createDeviceService(db, () => f.time);
+  assert.deepEqual(await service.manifest(await service.authorize(f.id, token, "manifest")), {...Object.fromEntries(Object.entries(release).filter(([key]) => key !== "approved")), sequence: 1});
+  await ref.update({otaBoardId: "adafruit_feather_esp32s3_reverse_tft"});
+  assert.equal(await service.manifest((await ref.get()).data()), null);
+  await assert.rejects(f.admin.change(f.request({action: "targetFirmware", deviceId: f.id, version})), {publicCode: "failed-precondition"});
 });

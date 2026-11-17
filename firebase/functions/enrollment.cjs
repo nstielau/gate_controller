@@ -1,4 +1,4 @@
-const {lastSeen} = require("./device-observation.cjs");
+const {lastSeen, knownBoard} = require("./device-observation.cjs");
 const {randomBytes: cryptoRandomBytes, createHash, createCipheriv, createDecipheriv} = require("node:crypto");
 const {userId, fail} = require("./controller.cjs");
 
@@ -159,6 +159,7 @@ function createEnrollment({db, broker, now = Date.now, randomBytes = cryptoRando
     const action = request?.action ?? "provision";
     if (!["provision", "complete", "maintenance", "restart_setup_complete"].includes(action)) fail("invalid-argument", "Invalid registration action.");
     if (request?.setup_reset_id !== undefined && !HEX_SECRET.test(request.setup_reset_id)) fail("invalid-argument", "Invalid setup reset.");
+    if (action === "maintenance" && request.board_id !== undefined && !knownBoard(request.board_id)) fail("invalid-argument", "Invalid device board.");
     if (action === "maintenance" && (!validVersion(request.app_version) || !supportsRestartSetupVersion(request.base_version))) fail("failed-precondition", "Compatible device firmware is required.");
     // The QR contains hash(secret), never the private proof or encryption key.
     const code = hash(secret);
@@ -178,7 +179,8 @@ function createEnrollment({db, broker, now = Date.now, randomBytes = cryptoRando
           const update = {lastSeenAtMs: lastSeen(device.lastSeenAtMs, device.maintenance?.lastSeenAtMs, time)};
           // A retry may read a report committed by a newer request.
           if ((lastSeen(device.maintenance?.lastSeenAtMs) || 0) <= time) {
-            update.maintenance = {appVersion: request.app_version, baseVersion: request.base_version, lastSeenAtMs: time, supportsRestartSetup: true};
+            update.maintenance = {appVersion: request.app_version, baseVersion: request.base_version, lastSeenAtMs: time, supportsRestartSetup: true,
+              ...(request.board_id !== undefined ? {boardId: request.board_id} : {})};
           }
           tx.update(deviceRef(id), update);
           return {response: {deviceId: id, restartSetup: reset ? {id: reset.id, state: reset.state} : null}};
@@ -288,7 +290,7 @@ function createRegistrationHandler(service) {
     try {
       const body = request.body && typeof request.body === "object" ? request.body : {};
       const result = await service.register({device_id: body.device_id ?? body.deviceId, device_secret: body.device_secret, action: body.action,
-        setup_reset_id: body.setup_reset_id, app_version: body.app_version, base_version: body.base_version});
+        setup_reset_id: body.setup_reset_id, app_version: body.app_version, base_version: body.base_version, board_id: body.board_id});
       return response.status(200).json(result);
     } catch (error) {
       const status = error?.publicCode === "unavailable" ? 503 : 400;

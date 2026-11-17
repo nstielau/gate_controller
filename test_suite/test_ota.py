@@ -140,6 +140,33 @@ class StoreTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 self.stage()
 
+    def test_feather_api2_manifest_requires_matching_board_and_compatibility(self):
+        board = "adafruit_feather_esp32s3_reverse_tft"
+        good = dict(
+            manifest(),
+            app_api_version=2,
+            minimum_bootstrap_version="1.1.0",
+            supported_board_ids=[board],
+        )
+        parsed = validate_manifest(good, board, 10)
+        self.assertEqual(parsed["app_api_version"], 2)
+        self.assertEqual(parsed["board_id"], board)
+        for changes in (
+            {"app_api_version": True},
+            {"minimum_bootstrap_version": "9.0.0"},
+            {"supported_board_ids": [board, board]},
+            {"supported_board_ids": [board, "other"]},
+            {"supported_board_ids": []},
+            {"supported_board_ids": [{}]},
+            {"app_api_version": 1},
+        ):
+            with self.assertRaises(ValueError):
+                validate_manifest(dict(good, **changes), board, 10)
+        with self.assertRaises(ValueError):
+            validate_manifest(good, "seeed_xiao_esp32_s3_sense", 10)
+        legacy = validate_manifest(manifest(), "seeed_xiao_esp32_s3_sense", 10)
+        self.assertEqual(legacy["app_api_version"], 1)
+
 
 class Wire:
     def __init__(self, data):
@@ -164,13 +191,17 @@ class BootstrapTests(unittest.TestCase):
             ("1", "seeed_xiao_esp32_s3_sense", False, False),
             ("1", "seeed_xiao_esp32_s3_sense", True, True),
             ("0", "seeed_xiao_esp32_s3_sense", True, False),
+            ("1", "adafruit_feather_esp32s3_reverse_tft", True, False),
+            ("1", "adafruit_feather_esp32s3_reverse_tft", False, True),
         ]:
             storage, digitalio = MagicMock(), MagicMock()
             digitalio.DigitalInOut.return_value.__enter__.return_value.value = pin_high
             modules = {
                 "storage": storage,
                 "digitalio": digitalio,
-                "board": SimpleNamespace(board_id=board_id, D9="recovery"),
+                "board": SimpleNamespace(
+                    board_id=board_id, D9="xiao-recovery", D1="feather-recovery"
+                ),
             }
             with patch.dict(sys.modules, modules), patch("os.getenv", return_value=enabled):
                 runpy.run_path(str(ROOT / "circuitpython/boot.py"))
@@ -178,6 +209,10 @@ class BootstrapTests(unittest.TestCase):
                 storage.remount.assert_called_once_with("/", readonly=False)
             else:
                 storage.remount.assert_not_called()
+            if enabled in (1, "1") and board_id == "adafruit_feather_esp32s3_reverse_tft":
+                digitalio.DigitalInOut.assert_called_once_with("feather-recovery")
+                button = digitalio.DigitalInOut.return_value.__enter__.return_value
+                button.switch_to_input.assert_called_once_with(pull=digitalio.Pull.DOWN)
 
     def test_maintenance_mode_never_loads_ota_candidate(self):
         self.app.board.board_id = "seeed_xiao_esp32_s3_sense"
@@ -199,6 +234,115 @@ class BootstrapTests(unittest.TestCase):
         store.assert_not_called()
         self.assertIsNone(self.app.watchdog_timer)
 
+    def test_feather_runtime_loads_api2_ui_only_with_device_write_ownership(self):
+        app = self.app
+        app.IS_REVERSE_TFT = True
+        app.board.board_id = "adafruit_feather_esp32s3_reverse_tft"
+        app.display = SimpleNamespace(display=None)
+        store = MagicMock(state={"outcome": "current"})
+        store.begin_boot.return_value = (None, None)
+        app.microcontroller.watchdog = MagicMock()
+        storage = SimpleNamespace(getmount=lambda _: SimpleNamespace(readonly=False))
+        with (
+            patch.dict(
+                sys.modules,
+                {
+                    "storage": storage,
+                    "watchdog": SimpleNamespace(WatchDogMode=SimpleNamespace(RESET="reset")),
+                },
+            ),
+            patch("os.getenv", return_value="1"),
+            patch("gate_ota.UpdateStore", return_value=store),
+            patch.object(app, "log_event"),
+        ):
+            app.initialize_application()
+        self.assertIs(app.ota_store, store)
+        self.assertIsNotNone(app.application_ui)
+        self.assertEqual(app.application_ui.__class__.__name__, "DeviceUI")
+
+    def test_api2_ui_constructor_failure_cleans_outputs_and_rolls_back_trial(self):
+        from tempfile import TemporaryDirectory
+
+        app = self.app
+        app.IS_REVERSE_TFT = True
+        app.board.board_id = "adafruit_feather_esp32s3_reverse_tft"
+        app.microcontroller.cpu.reset_reason = "test"
+        app.microcontroller.watchdog = MagicMock()
+        storage = SimpleNamespace(getmount=lambda _: SimpleNamespace(readonly=False))
+        config = {
+            "ssid": "Example",
+            "password": "",
+            "mqtt_username": "test",
+            "mqtt_password": "test",  # pragma: allowlist secret
+            "mqtt_command_topic": "command",
+            "mqtt_topic": "status",
+        }
+        source = "APP_VERSION='1.1.0'\nAPP_API_VERSION=2\nfrom drawbridge import App\nclass Bad(App):\n def create_ui(self,*args): raise RuntimeError('bad_ui')\ndef create_app(p,n): return Bad(p,n)\n"
+        with TemporaryDirectory() as folder:
+            path = Path(folder) / "candidate.py"
+            path.write_text(source)
+            store = MagicMock(state={"trial": {"sequence": 1}, "outcome": "trial"})
+            store.begin_boot.return_value = (
+                str(path),
+                {"app_version": "1.1.0", "app_api_version": 2, "board_id": app.board.board_id},
+            )
+            with (
+                patch.dict(
+                    sys.modules,
+                    {
+                        "storage": storage,
+                        "watchdog": SimpleNamespace(WatchDogMode=SimpleNamespace(RESET="reset")),
+                    },
+                ),
+                patch("os.getenv", return_value="1"),
+                patch("gate_ota.UpdateStore", return_value=store),
+                patch.object(app, "load_config", return_value=config),
+                patch.object(app, "add_settings_credentials", side_effect=lambda c: c),
+                patch.object(app, "setup_requested", return_value=False),
+                patch.object(app, "log_event"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "bad_ui"):
+                    app.main()
+            store.rollback.assert_called_once()
+            app.supervisor.reload.assert_called_once()
+            self.assertFalse(app.gate_output.value)
+            self.assertFalse(app.hold_led.value)
+
+    def test_legacy_candidate_without_ui_or_new_journal_metadata_keeps_actual_version(self):
+        app = self.app
+        app.board.board_id = "seeed_xiao_esp32_s3_sense"
+        app.microcontroller.watchdog = MagicMock()
+        app.display = SimpleNamespace(display=None)
+        source = "APP_VERSION='1.0.0'\nAPP_API_VERSION=1\nfrom drawbridge import Indicators\nclass Legacy:\n def __init__(self,p,n): self.indicators=Indicators(n)\ndef create_app(p,n): return Legacy(p,n)\n"
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "legacy.py"
+            path.write_text(source)
+            store = MagicMock(state={"trial": None, "outcome": "current"})
+            store.begin_boot.return_value = (str(path), {"app_version": "1.0.0", "sequence": 2})
+            storage = SimpleNamespace(getmount=lambda _: SimpleNamespace(readonly=False))
+            with (
+                patch.dict(
+                    sys.modules,
+                    {
+                        "storage": storage,
+                        "watchdog": SimpleNamespace(WatchDogMode=SimpleNamespace(RESET="reset")),
+                    },
+                ),
+                patch("os.getenv", return_value="1"),
+                patch("gate_ota.UpdateStore", return_value=store),
+                patch.object(app, "log_event"),
+            ):
+                app.initialize_application()
+        self.assertEqual(app.ota_version, "1.0.0")
+        self.assertIsNone(app.application_ui)
+
+    def test_trial_defers_maintenance_reset_until_resolved(self):
+        app = self.app
+        app.ota_store = MagicMock(state={"trial": {"sequence": 1}})
+        with patch.object(app, "registration_request") as request:
+            self.assertFalse(app.check_maintenance(None, {}, MagicMock()))
+            request.assert_not_called()
+
     def test_trial_requires_continuous_online_health_then_rolls_back_on_timeout(self):
         app = self.app
         app.ota_store = MagicMock(state={"trial": {"sequence": 1}})
@@ -219,6 +363,22 @@ class BootstrapTests(unittest.TestCase):
             app.ota_service(None, client)
         app.ota_store.confirm.assert_called_once()
         with patch.object(app.time, "monotonic", return_value=301):
+            app.ota_service(None, None)
+        app.ota_store.rollback.assert_called_once()
+        app.supervisor.reload.assert_called_once()
+
+    def test_expired_offline_trial_defers_deliberate_reload_until_hold_ends(self):
+        app = self.app
+        app.ota_store = MagicMock(state={"trial": {"sequence": 1}})
+        app.ota_trial_started = 0
+        app.hold = MagicMock()
+        app.hold.active.return_value = True
+        with patch.object(app.time, "monotonic", return_value=301):
+            app.ota_service(None, None)
+        app.ota_store.rollback.assert_not_called()
+        app.supervisor.reload.assert_not_called()
+        app.hold.active.return_value = False
+        with patch.object(app.time, "monotonic", return_value=302):
             app.ota_service(None, None)
         app.ota_store.rollback.assert_called_once()
         app.supervisor.reload.assert_called_once()
@@ -247,6 +407,7 @@ class BootstrapTests(unittest.TestCase):
                 "base_version": app.BASE_VERSION,
                 "sequence": 9,
                 "state": "current",
+                "board_id": str(app.board.board_id),
             },
         )
 

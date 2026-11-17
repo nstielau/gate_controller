@@ -1,7 +1,7 @@
 const {createHash, timingSafeEqual} = require("node:crypto");
 const {userId, fail} = require("./controller.cjs");
 const {supportsRestartSetupVersion} = require("./enrollment.cjs");
-const {observation, publicReport, lastSeen} = require("./device-observation.cjs");
+const {observation, publicReport, lastSeen, knownBoard} = require("./device-observation.cjs");
 const OWNER = "nick.stielau@gmail.com";
 const hash = value => createHash("sha256").update(value).digest("hex");
 const DEVICE = /^[a-z0-9-]{1,64}$/;
@@ -15,16 +15,30 @@ function actor(request) {
   return {uid, email: emailAddress(request.auth.token.email)};
 }
 function validateManifest(m) {
-  if (!m || m.schema !== 1 || !VERSION.test(m.app_version) || m.app_api_version !== 1 ||
-      m.minimum_bootstrap_version !== "1.0.0" || m.circuitpython_major !== 10 ||
-      !Array.isArray(m.supported_board_ids) || m.supported_board_ids.length !== 1 ||
-      m.supported_board_ids[0] !== "seeed_xiao_esp32_s3_sense" ||
+  const boards = m?.supported_board_ids;
+  const validBoards = Array.isArray(boards) && boards.length > 0 && boards.every(value => knownBoard(value)) && new Set(boards).size === boards.length;
+  const compatibility = m?.app_api_version === 1
+    ? m.minimum_bootstrap_version === "1.0.0" && Array.isArray(boards) && boards.length === 1 && boards[0] === "seeed_xiao_esp32_s3_sense"
+    : m?.app_api_version === 2 && m.minimum_bootstrap_version === "1.1.0" && validBoards;
+  if (!m || m.schema !== 1 || !VERSION.test(m.app_version) || !compatibility || m.circuitpython_major !== 10 ||
       !Number.isInteger(m.size) || m.size < 1 || m.size > 65536 ||
       !/^[a-f0-9]{64}$/.test(m.sha256) || !/^[a-f0-9]{40}$/.test(m.git_commit) ||
       m.artifact_object !== `firmware/${m.app_version}/${m.sha256}/drawbridge.py`) {
     fail("invalid-argument", "Invalid or incompatible firmware manifest.");
   }
   return Object.fromEntries(["schema", "app_version", "app_api_version", "minimum_bootstrap_version", "circuitpython_major", "supported_board_ids", "size", "sha256", "git_commit", "artifact_object"].map(k => [k, m[k]]));
+}
+function compatibleManifest(device, manifest) {
+  const seen = observation(device);
+  if (manifest.app_api_version === 1) {
+    return (device.otaBoardId === undefined || device.otaBoardId === "seeed_xiao_esp32_s3_sense") &&
+      (seen.boardId === null || seen.boardId === "seeed_xiao_esp32_s3_sense");
+  }
+  const base = seen.baseVersion;
+  if (!knownBoard(device.otaBoardId) || seen.boardId !== device.otaBoardId || !manifest.supported_board_ids.includes(device.otaBoardId) ||
+      !base || base.length > 32 || !base.split(".").every(part => Number.isSafeInteger(Number(part)))) return false;
+  const [major, minor, patch] = base.split(".").map(Number);
+  return major > 1 || (major === 1 && (minor > 0 || patch >= 15));
 }
 function publicMaintenance(value) {
   if (!value || typeof value !== "object") return null;
@@ -33,6 +47,7 @@ function publicMaintenance(value) {
     lastSeenAtMs: Number.isSafeInteger(value.lastSeenAtMs) ? value.lastSeenAtMs : null,
     appVersion: typeof value.appVersion === "string" && VERSION.test(value.appVersion) ? value.appVersion : null,
     baseVersion: typeof value.baseVersion === "string" && VERSION.test(value.baseVersion) ? value.baseVersion : null,
+    ...(knownBoard(value.boardId) ? {boardId: value.boardId} : {}),
   };
 }
 function publicSetupReset(value) {
@@ -98,7 +113,8 @@ function createAdministration(db, now = Date.now) {
           if (data.action === "targetFirmware") {
             release = (await tx.get(db.doc("firmwareReleases/" + data.version))).data();
             if (!release?.approved || !device.enabled || !device.otaCredentialHash) fail("failed-precondition", "Device must be enabled and enrolled; release must be approved.");
-            validateManifest(release);
+            const manifest = validateManifest(release);
+            if (!compatibleManifest(device, manifest)) fail("failed-precondition", "Device board and reported base are incompatible with this release. A USB update or fresh device report may be required.");
           }
         }
         if (data.action === "restartSetup") {
@@ -148,12 +164,15 @@ function createDeviceService(db, now = Date.now) {
       if (!target?.enabled) return null;
       const release = (await db.doc("firmwareReleases/" + target.version).get()).data();
       if (!release?.approved) return null;
-      return {...validateManifest(release), sequence: target.sequence};
+      const manifest = validateManifest(release);
+      if (!compatibleManifest(device, manifest)) return null;
+      return {...manifest, sequence: target.sequence};
     },
     async report(deviceId, value) {
       if (!value || !["current", "trial", "rolled_back", "error", "disabled"].includes(value.state) ||
           !VERSION.test(value.version || "") || !Number.isSafeInteger(value.sequence) || value.sequence < 0 ||
           (value.reason !== undefined && !/^[a-z_]{1,40}$/.test(value.reason)) ||
+          (value.board_id !== undefined && !knownBoard(value.board_id)) ||
           (value.base_version !== undefined && (typeof value.base_version !== "string" || !VERSION.test(value.base_version)))) fail("invalid-argument", "Invalid firmware report.");
       const ref = db.doc("devices/" + deviceId), time = now();
       await db.runTransaction(async tx => {
@@ -162,7 +181,8 @@ function createDeviceService(db, now = Date.now) {
         if ((lastSeen(device?.reportedFirmware?.atMs) || 0) <= time) {
           update.reportedFirmware = {
             state: value.state, version: value.version, base_version: value.base_version || null, sequence: value.sequence,
-            reason: value.reason || null, atMs: time
+            reason: value.reason || null, atMs: time,
+            ...(value.board_id !== undefined ? {board_id: value.board_id} : {})
           };
         }
         tx.update(ref, update);

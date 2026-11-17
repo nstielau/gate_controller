@@ -65,6 +65,7 @@ class RuntimeSetupTests(unittest.TestCase):
     def setUp(self):
         from test_regressions import ConfigTests
         ConfigTests.setUp(self, board_id="adafruit_feather_esp32s3_reverse_tft")
+        self.app.application_ui = self.app.create_app(self.app.Platform(),0).create_ui(None,self.app.device_suffix())
 
     def test_buttons_have_separate_polarities_and_preserve_fresh_identity(self):
         from unittest.mock import patch
@@ -79,9 +80,9 @@ class RuntimeSetupTests(unittest.TestCase):
         self.assertTrue(save.call_args.args[0]["registration_complete"])
         self.assertTrue(self.app.next_boot_setup)
         self.app.button_action(0, 100)
-        self.assertEqual(self.app.website_until, 120)
+        self.assertEqual(self.app.application_ui.website_until, 120)
         self.app.button_action(1, 101)
-        self.assertEqual(self.app.website_until, 0)
+        self.assertEqual(self.app.application_ui.website_until, 0)
 
     def test_failed_reset_cleanup_keeps_pending_config_and_never_reloads(self):
         from unittest.mock import patch
@@ -167,7 +168,8 @@ class RuntimeSetupTests(unittest.TestCase):
         from unittest.mock import MagicMock, patch
         self.app.gate_output = SimpleNamespace(value=False)
         self.app.display = MagicMock()
-        self.app.website_until = 120
+        self.app.application_ui.display = self.app.display
+        self.app.application_ui.website_until = 120
         with patch.object(self.app.time, "monotonic", side_effect=[119,120]), patch.object(self.app,"service_status_led"):
             self.app.service_outputs(None, online=True)
             self.app.service_outputs(None, online=True)

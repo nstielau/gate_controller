@@ -51,6 +51,38 @@ def base_bundle(root, head, app_source):
     return manifest, stream.getvalue()
 
 
+def application_manifest(source, version, head):
+    """Keep legacy bytes stable while selecting the API2 Feather rollout."""
+    constants = {}
+    for item in ast.parse(source).body:
+        if isinstance(item, ast.Assign) and isinstance(item.targets[0], ast.Name):
+            if item.targets[0].id in ("APP_VERSION", "APP_API_VERSION"):
+                constants[item.targets[0].id] = ast.literal_eval(item.value)
+    api = constants.get("APP_API_VERSION")
+    if (
+        constants.get("APP_VERSION") != version
+        or type(api) is not int
+        or api not in (1, 2)
+        or len(source) > 65536
+    ):
+        raise ValueError("Application version/API or size mismatch")
+    checksum = hashlib.sha256(source).hexdigest()
+    return {
+        "schema": 1,
+        "app_version": version,
+        "app_api_version": api,
+        "minimum_bootstrap_version": "1.0.0" if api == 1 else "1.1.0",
+        "circuitpython_major": 10,
+        "supported_board_ids": [
+            "seeed_xiao_esp32_s3_sense" if api == 1 else "adafruit_feather_esp32s3_reverse_tft"
+        ],
+        "size": len(source),
+        "sha256": checksum,
+        "artifact_object": f"firmware/{version}/{checksum}/drawbridge.py",
+        "git_commit": head,
+    }
+
+
 def build_release(version):
     if not re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", version):
         raise ValueError("Use a semantic version, e.g. 1.0.0")
@@ -69,26 +101,7 @@ def build_release(version):
         check=True,
     )
     source = (ROOT / "circuitpython/drawbridge.py").read_bytes()
-    constants = {}
-    for item in ast.parse(source).body:
-        if isinstance(item, ast.Assign) and isinstance(item.targets[0], ast.Name):
-            if item.targets[0].id in ("APP_VERSION", "APP_API_VERSION"):
-                constants[item.targets[0].id] = ast.literal_eval(item.value)
-    if constants != {"APP_VERSION": version, "APP_API_VERSION": 1} or len(source) > 65536:
-        raise ValueError("Application version/API or size mismatch")
-    checksum = hashlib.sha256(source).hexdigest()
-    manifest = {
-        "schema": 1,
-        "app_version": version,
-        "app_api_version": 1,
-        "minimum_bootstrap_version": "1.0.0",
-        "circuitpython_major": 10,
-        "supported_board_ids": ["seeed_xiao_esp32_s3_sense"],
-        "size": len(source),
-        "sha256": checksum,
-        "artifact_object": f"firmware/{version}/{checksum}/drawbridge.py",
-        "git_commit": head,
-    }
+    manifest = application_manifest(source, version, head)
     base_manifest, base_zip = base_bundle(ROOT, head, source)
     out = ROOT / "artifacts/firmware" / version
     out.mkdir(parents=True, exist_ok=True)

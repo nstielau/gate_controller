@@ -60,7 +60,7 @@ def pairing_code(secret):
 
 
 def registration_payload(device_id, secret=None, action=None, setup_reset_id=None,
-                         app_version=None, base_version=None):
+                         app_version=None, base_version=None, board_id=None):
     result = {"device_id": normalize_device_id(device_id),
               "device_secret": validate_pairing_secret(secret)}
     if action is not None:
@@ -73,6 +73,8 @@ def registration_payload(device_id, secret=None, action=None, setup_reset_id=Non
         raise ValueError("setup reset id required")
     if action == "maintenance":
         result.update(app_version=app_version, base_version=base_version)
+        if board_id is not None:
+            result["board_id"] = board_id
     return result
 
 

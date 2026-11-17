@@ -314,3 +314,18 @@ test("an older retried maintenance request cannot replace a newer firmware snaps
   assert.equal(stored.lastSeenAtMs, start + 100);
   assert.deepEqual(stored.maintenance, {appVersion: "1.0.2", baseVersion: "1.0.14", lastSeenAtMs: start + 100, supportsRestartSetup: true});
 });
+
+test("maintenance stores only known optional board metadata without inferring it from earlier snapshots", async () => {
+  const f = await registeredFixture(), board = "adafruit_feather_esp32s3_reverse_tft";
+  const request = {...f.device, action: "maintenance", app_version: "1.1.0", base_version: "1.0.15", board_id: board};
+  await f.api.register(request);
+  assert.equal(f.db.get("devices/" + f.id).maintenance.boardId, board);
+  for (const board_id of ["unknown", null, {}, [board]]) await assert.rejects(f.api.register({...request, board_id}), {publicCode: "invalid-argument"});
+  await f.api.register({...request, board_id: undefined});
+  assert.equal(f.db.get("devices/" + f.id).maintenance.boardId, undefined);
+  const handler = createRegistrationHandler(f.api);
+  const response = {set() {}, status(code) { this.code = code; return this; }, json(value) { this.body = value; return this; }};
+  await handler({method: "POST", body: request}, response);
+  assert.equal(response.code, 200);
+  assert.equal(f.db.get("devices/" + f.id).maintenance.boardId, board);
+});
