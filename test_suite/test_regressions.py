@@ -177,15 +177,156 @@ class PublisherTests(unittest.TestCase):
 
 
 class ConfigTests(unittest.TestCase):
-    def setUp(self):
+    def setUp(self, board_id=None):
         spec = importlib.util.spec_from_file_location("gate_app", ROOT / "circuitpython/code.py")
         self.app = importlib.util.module_from_spec(spec)
         self.nvm = bytearray(512)
         modules = {name: MagicMock() for name in ("board", "digitalio", "wifi", "supervisor")}
+        if board_id is not None:
+            modules["board"].board_id = board_id
         modules["digitalio"].DigitalInOut.side_effect = lambda pin: MagicMock(value=False)
         modules["microcontroller"] = SimpleNamespace(nvm=self.nvm, cpu=SimpleNamespace(uid=b"123456"))
         with patch.dict(sys.modules, modules):
             spec.loader.exec_module(self.app)
+
+    def test_add_network_preserves_existing_registration_and_password(self):
+        config = {"ssid": "Old", "password": "old-test-pass", "mqtt_username": "user", "mqtt_password": "identity", "mqtt_topic": "status", "mqtt_command_topic": "command", "registration_complete": True}  # pragma: allowlist secret
+        self.app.save_config(config)
+        result = self.app.config_from_form({"ssid": "New", "password": "new-test-pass"})
+        self.assertEqual([p["ssid"] for p in result["wifi_networks"]], ["Old", "New"])
+        self.assertTrue(result["registration_complete"])
+        self.assertEqual(result["mqtt_password"], "identity")
+        self.assertNotIn("old-test-pass", self.app.page())
+        self.assertNotIn("identity", self.app.page())
+        self.assertIn("Old", self.app.page())
+
+    def test_wifi_connection_falls_through_and_persists_success_once(self):
+        config = {"ssid": "Old", "password": "old-test-pass", "wifi_networks": [{"ssid": "Old", "password": "old-test-pass"}, {"ssid": "New", "password": "new-test-pass"}], "mqtt_password": "identity"}  # pragma: allowlist secret
+        self.app.wifi.radio.connect.side_effect = [OSError("unavailable"), None]
+        with patch.object(self.app, "scan_networks", return_value=[]), patch.object(self.app, "save_config") as save:
+            self.app.connect_saved_wifi(config)
+        self.assertEqual(self.app.wifi.radio.connect.call_count, 2)
+        self.assertEqual(config["ssid"], "New")
+        self.assertEqual(config["mqtt_password"], "identity")
+        save.assert_called_once_with(config)
+
+    def test_forgetting_last_network_round_trips_identity(self):
+        self.app.save_config({"ssid": "Old", "password": "old-test-pass", "registration_complete": True})  # pragma: allowlist secret
+        result = self.app.config_from_form({"wifi_action": "forget", "forget_ssid": "Old"})
+        self.app.save_config(result)
+        self.assertEqual(self.app.load_config()["wifi_networks"], [])
+        self.assertTrue(self.app.load_config()["registration_complete"])
+
+    def test_feather_setup_button_is_active_high_input_and_xiao_does_not_claim_it(self):
+        self.app.IS_REVERSE_TFT = True
+        button = MagicMock(value=True)
+        self.app.digitalio.DigitalInOut.side_effect = lambda pin: button
+        self.assertTrue(self.app.setup_requested())
+        button.switch_to_input.assert_called_once_with(pull=self.app.digitalio.Pull.DOWN)
+        button.deinit.assert_called_once()
+        self.app.IS_REVERSE_TFT = False
+        self.app.digitalio.DigitalInOut.reset_mock()
+        self.assertFalse(self.app.setup_requested())
+        self.app.digitalio.DigitalInOut.assert_not_called()
+
+    def test_explicit_setup_never_enters_mqtt_or_registration(self):
+        self.app.microcontroller.cpu.reset_reason = "test"
+        config = {"ssid": "Old", "password": "test-pass", "mqtt_username": "user", "mqtt_password": "identity", "mqtt_topic": "status", "mqtt_command_topic": "command"}  # pragma: allowlist secret
+        with (
+            patch.object(self.app, "setup_requested", return_value=True),
+            patch.object(self.app, "load_config", return_value=config),
+            patch.object(self.app, "initialize_application") as init,
+            patch.object(self.app, "service_outputs"),
+            patch.object(self.app, "startup_pin_diagnostic"),
+            patch.object(self.app, "run_portal", side_effect=KeyboardInterrupt),
+            patch.object(self.app, "run_configured_controller") as controller,
+            patch.object(self.app, "run_registration") as register,
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                self.app.main()
+        controller.assert_not_called()
+        register.assert_not_called()
+        init.assert_called_once_with(allow_ota=False)
+        self.assertFalse(self.app.gate_output.value)
+
+    def test_portal_response_sends_complete_html_in_small_chunks(self):
+        class BoundedClient:
+            def __init__(self):
+                self.data = bytearray()
+                self.sizes = []
+                self.attempts = 0
+
+            def send(self, data):
+                self.attempts += 1
+                if self.attempts == 2:
+                    raise OSError(11, "would block")
+                count = min(97, len(data))
+                self.sizes.append(len(data))
+                self.data.extend(data[:count])
+                return count
+
+            def sendall(self, data):
+                self.sizes.append(len(data))
+                if len(data) > 512:
+                    raise ValueError("write exceeds bounded socket buffer")
+                self.data.extend(data)
+
+        client = BoundedClient()
+        body = self.app.page(networks=[])
+        with patch.object(self.app.time, "sleep"), patch.object(self.app, "log_event"):
+            self.app.send_response(client, body)
+        header, payload = bytes(client.data).split(b"\r\n\r\n", 1)
+        self.assertEqual(payload, body.encode("utf-8"))
+        self.assertIn(b"Content-Length: " + str(len(payload)).encode(), header)
+        self.assertIn(b"Save and connect", payload)
+        self.assertLessEqual(max(client.sizes), 512)
+        self.assertGreater(client.attempts, 2)
+
+    def test_successful_save_closes_socket_before_waiting_and_restarting(self):
+        events = []
+        client = MagicMock()
+        client.close.side_effect = lambda: events.append("close")
+        server = MagicMock()
+        server.accept.return_value = (client, None)
+        with (
+            patch.object(self.app, "read_http_request", return_value=(b"POST /configure HTTP/1.1", b"")),
+            patch.object(self.app, "config_from_form", return_value={"ssid": "Example"}),
+            patch.object(self.app, "save_config"),
+            patch.object(self.app, "log_event"),
+            patch.object(self.app, "send_response", side_effect=lambda *args: events.append("send")),
+            patch.object(self.app.time, "sleep", side_effect=lambda seconds: events.append("wait")),
+            patch.object(self.app.supervisor, "reload", side_effect=lambda: events.append("reload")),
+        ):
+            self.app.service_http(server)
+        self.assertEqual(events, ["send", "close", "wait", "reload"])
+
+    def test_pairing_secret_persists_once_and_registration_posts_private_proof(self):
+        config = {"ssid": "Example", "password": ""}
+        with patch.object(self.app, "save_config") as save:
+            self.app.ensure_pairing_config(config)
+            first = config["pairing_secret"]
+            self.app.ensure_pairing_config(config)
+        self.assertEqual(len(first), 64)
+        self.assertEqual(save.call_count, 1)
+        response = MagicMock(status_code=400)
+        session = MagicMock()
+        session.post.return_value = response
+        with patch.object(self.app.ssl, "create_default_context"), patch("builtins.open", unittest.mock.mock_open(read_data="public-root")), patch.object(self.app.adafruit_requests, "Session", return_value=session):
+            self.assertIsNone(self.app.registration_request(object(), config))
+        posted = session.post.call_args.kwargs["json"]
+        self.assertEqual(posted["device_secret"], first)
+        self.assertNotIn(first, session.post.call_args.args[0])
+        response.close.assert_called_once()
+
+    def test_pairing_completion_is_saved_only_after_server_ack(self):
+        config = {"pairing_secret": "01"*32, "registration_complete": True}
+        with patch.object(self.app, "registration_request", return_value=None), patch.object(self.app, "save_config") as save:
+            self.assertFalse(self.app.complete_registration(object(), config))
+            save.assert_not_called()
+        with patch.object(self.app, "registration_request", return_value={"state":"registered"}), patch.object(self.app, "save_config") as save:
+            self.assertTrue(self.app.complete_registration(object(), config))
+            self.assertTrue(config["registration_acknowledged"])
+            save.assert_called_once_with(config)
 
     def test_nvm_record_larger_than_one_byte_length(self):
         config = {"ssid": "test", "password": "p" * 63, "mqtt_password": "q" * 128, "mqtt_topic": "gate/test/status"}

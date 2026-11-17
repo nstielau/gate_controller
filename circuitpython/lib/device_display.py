@@ -8,8 +8,14 @@ except ImportError:
 APP_URL = "https://drawbridge-45487.firebaseapp.com/"
 
 
-def registration_qr_url(device_id):
-    return APP_URL + "?device_id=" + normalize_device_id(device_id)
+def registration_qr_url(device_id, code=None):
+    device_id = normalize_device_id(device_id)
+    if code is None:
+        return APP_URL + "?device_id=" + device_id
+    if len(code) != 64 or any(c not in "0123456789abcdef" for c in code):
+        raise ValueError("invalid pairing code")
+    # Compact alias redirects to the canonical auth origin, preserving fragment.
+    return "https://drawbridge.stielau.us/?d=" + device_id + "#p=" + code
 
 
 def qr_matrix(value):
@@ -24,9 +30,9 @@ def qr_matrix(value):
         # always supplies adafruit_miniqr, so this branch is only a test-safe
         # shape fallback and is never used for a device QR code.
         raw = [[(x * 17 + y * 31 + len(value)) % 7 < 3 for x in range(33)] for y in range(33)]
-    quiet = [[False] * (len(raw) + 4) for _ in range(len(raw) + 4)]
+    quiet = [[False] * (len(raw) + 8) for _ in range(len(raw) + 8)]
     for y, row in enumerate(raw):
-        quiet[y + 2][2 : 2 + len(row)] = row
+        quiet[y + 4][4 : 4 + len(row)] = row
     return quiet
 
 
@@ -82,17 +88,32 @@ class ReverseTFT:
         except (ImportError, AttributeError, RuntimeError, ValueError):
             return
 
-    def show_qr(self):
+    def show_setup(self, ssid):
         if self.display is None:
             return
         try:
             import displayio
             import terminalio
             from adafruit_display_text import label
-            matrix = qr_matrix(registration_qr_url(self.state.device_id))
+            group = displayio.Group()
+            for text, y in (("DRAWBRIDGE WIFI SETUP", 16), (ssid, 42),
+                            ("Open 192.168.4.1", 66), ("Add / update networks", 90)):
+                group.append(label.Label(terminalio.FONT, text=text, color=0xFFFFFF, x=4, y=y))
+            self._show_group(group)
+        except (ImportError, AttributeError, RuntimeError, ValueError):
+            return
+
+    def show_qr(self, code=None, phase=None):
+        if self.display is None:
+            return
+        try:
+            import displayio
+            import terminalio
+            from adafruit_display_text import label
+            matrix = qr_matrix(registration_qr_url(self.state.device_id, code))
             size = len(matrix)
-            scale = max(1, min(3, 110 // size))
-            width = size * scale + 4
+            scale = max(1, min(3, (self.display.height - 37) // size))
+            width = size * scale
             bitmap = displayio.Bitmap(width, width, 2)
             palette = displayio.Palette(2)
             palette[0] = 0xFFFFFF
@@ -102,17 +123,29 @@ class ReverseTFT:
                     if dark:
                         for dy in range(scale):
                             for dx in range(scale):
-                                bitmap[2 + x * scale + dx, 2 + y * scale + dy] = 1
+                                bitmap[x * scale + dx, y * scale + dy] = 1
             group = displayio.Group()
-            group.append(displayio.TileGrid(bitmap, pixel_shader=palette, x=2, y=2))
-            instruction = label.Label(terminalio.FONT, text="SCAN TO REGISTER", color=0xFFFFFF, x=94, y=20)
-            device = label.Label(terminalio.FONT, text=self.state.device_id, color=0xFFFFFF, x=94, y=56)
-            group.append(instruction)
-            group.append(device)
+            qr_x = self.display.width - width - 4
+            qr_y = 15
+            center_x = qr_x + width // 2
+            group.append(displayio.TileGrid(bitmap, pixel_shader=palette, x=qr_x, y=qr_y))
+            group.append(label.Label(terminalio.FONT, text="Scan to Register", color=0xFFFFFF,
+                                     anchor_point=(0.5, 0.5), anchored_position=(center_x, 7)))
+            group.append(label.Label(terminalio.FONT, text=self.state.device_id, color=0xFFFFFF,
+                                     scale=2, anchor_point=(0.5, 0.5),
+                                     anchored_position=(center_x, 123)))
+            for text, y in (("Hold", 64), ("D1 + RESET", 80), ("Add Wi-Fi", 96)):
+                group.append(label.Label(terminalio.FONT, text=text, color=0xFFFFFF, x=4, y=y))
+            for line, text in enumerate(phase or ("Scan QR", "to pair")):
+                y = 14 + line * 15
+                group.append(label.Label(terminalio.FONT, text=text, color=0xFFFFFF, x=4, y=y))
             self._show_group(group)
         except (ImportError, AttributeError, RuntimeError, ValueError):
             # The status loop remains usable if an optional display library is missing.
             return
+
+    def show_registration(self, phase, code):
+        self.show_qr(code, phase)
 
     def show_status(self, wifi=False, mqtt=False, hold=False):
         if self.display is None:
@@ -122,9 +155,27 @@ class ReverseTFT:
             import terminalio
             from adafruit_display_text import label
             group = displayio.Group()
-            group.append(label.Label(terminalio.FONT, text=self.state.device_id, color=0xFFFFFF, x=4, y=12))
-            group.append(label.Label(terminalio.FONT, text="WIFI {} MQTT {} HOLD {}".format(
-                "OK" if wifi else "--", "OK" if mqtt else "--", "ON" if hold else "--"), color=0xFFFFFF, x=4, y=30))
+            background = displayio.Bitmap(self.display.width, self.display.height, 2)
+            palette = displayio.Palette(2)
+            palette[0] = 0xF3F4EB
+            palette[1] = 0x173F35
+            for y in range(32):
+                for x in range(self.display.width):
+                    background[x, y] = 1
+            group.append(displayio.TileGrid(background, pixel_shader=palette))
+            group.append(label.Label(terminalio.FONT, text="Drawbridge", color=0xF3F4EB,
+                                     scale=2, x=10, y=15))
+            group.append(label.Label(terminalio.FONT, text=self.state.device_id, color=0xF3F4EB,
+                                     x=self.display.width - 44, y=15))
+            rows = (("Wi-Fi", "Connected" if wifi else "Connecting", wifi, 49),
+                    ("MQTT", "Connected" if mqtt else "Reconnecting", mqtt, 78),
+                    ("Hold", "ON" if hold else "OFF", hold, 107))
+            for title, value, active, y in rows:
+                group.append(label.Label(terminalio.FONT, text=title, color=0x173F35,
+                                         scale=2, x=10, y=y))
+                group.append(label.Label(terminalio.FONT, text=value,
+                                         color=0x173F35 if active else 0x66736B,
+                                         x=116, y=y, scale=2 if title == "Hold" else 1))
             self._show_group(group)
         except (ImportError, AttributeError, RuntimeError, ValueError):
             return

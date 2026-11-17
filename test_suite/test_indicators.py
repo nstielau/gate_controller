@@ -95,6 +95,54 @@ class IndicatorTests(unittest.TestCase):
 class OutputTests(unittest.TestCase):
     setUp = regressions.ConfigTests.setUp
 
+    def test_feather_drives_wing_indicators_and_active_high_heartbeat(self):
+        regressions.ConfigTests.setUp(self, board_id="adafruit_feather_esp32s3_reverse_tft")
+        self.app.gate_output = SimpleNamespace(value=False)
+        self.app.wifi_led = self.app.make_status_output(self.app.WIFI_INDICATOR_PIN)
+        self.app.mqtt_led = self.app.make_status_output(self.app.MQTT_INDICATOR_PIN)
+        self.app.hold_led = self.app.make_status_output(self.app.HOLD_INDICATOR_PIN)
+        self.app.indicators = Indicators(0)
+        self.app.digitalio.DigitalInOut.reset_mock()
+        with patch.object(self.app, "log_event"):
+            self.app.service_status_led(True, True, False, 0)
+        self.assertTrue(self.app.led.value)
+        self.assertTrue(self.app.wifi_led.value)
+        self.assertFalse(self.app.gate_output.value)
+        self.app.digitalio.DigitalInOut.assert_not_called()
+
+    def test_feather_main_uses_physical_wing_header_pins_and_cleans_up(self):
+        regressions.ConfigTests.setUp(self, board_id="adafruit_feather_esp32s3_reverse_tft")
+        self.app.microcontroller.cpu.reset_reason = "test"
+        gate = MagicMock(value=False)
+        self.app.digitalio.DigitalInOut.reset_mock()
+        self.app.digitalio.DigitalInOut.side_effect = lambda pin: gate
+        with (
+            patch.object(self.app, "log_event"),
+            patch.object(self.app, "service_outputs"),
+            patch.object(self.app, "setup_requested", return_value=False),
+            patch.object(self.app, "load_config", return_value=None),
+            patch.object(self.app, "run_portal", side_effect=KeyboardInterrupt),
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                self.app.main()
+        self.assertEqual(
+            [c.args[0] for c in self.app.digitalio.DigitalInOut.call_args_list],
+            [self.app.board.D11, self.app.board.D5, self.app.board.D6, self.app.board.D9],
+        )
+        self.assertNotIn(
+            self.app.board.D10, [c.args[0] for c in self.app.digitalio.DigitalInOut.call_args_list]
+        )
+        self.assertEqual(gate.switch_to_output.call_count, 4)
+        self.assertFalse(gate.value)
+        self.assertEqual(gate.deinit.call_count, 4)
+        self.assertFalse(self.app.led.value)
+
+    def test_feather_startup_diagnostic_never_claims_buttons(self):
+        self.app.IS_REVERSE_TFT = True
+        self.app.digitalio.DigitalInOut.reset_mock()
+        self.app.startup_pin_diagnostic()
+        self.app.digitalio.DigitalInOut.assert_not_called()
+
     def test_pin_polarity_and_transistor_never_toggled_by_indicators(self):
         self.app.gate_output = SimpleNamespace(value=True)
         self.app.hold_led = SimpleNamespace(value=False)

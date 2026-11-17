@@ -27,11 +27,18 @@ from gate_mqtt import GateMQTT, NETWORK_SECONDS
 from drawbridge import Indicators, create_app, APP_VERSION
 from gate_hold import HoldState
 from gate_base import BASE_VERSION
-from device_enrollment import apply_registration, registration_payload, visible_networks
+from device_enrollment import (
+    apply_registration,
+    registration_payload,
+    visible_networks,
+    pairing_code,
+)
 from device_display import ReverseTFT
+from gate_wifi import profiles, update_network, forget_network, connection_order
+from gate_portal import render_page, render_confirmation
 
 
-CONFIG_SIZE = min(512, len(microcontroller.nvm))
+CONFIG_SIZE = min(4096, len(microcontroller.nvm))
 CONFIG_MAGIC = b"GATE3"
 OLD_CONFIG_MAGIC = b"GATE1"
 OLD_CONFIG_SIZE = 192
@@ -42,13 +49,34 @@ EMQX_CA_FILE = "/certs/emqxsl-ca.crt"
 REGISTRATION_ENDPOINT = "https://us-east1-drawbridge-45487.cloudfunctions.net/deviceRegister"
 BOOT_ID = "".join("{:02x}".format(value) for value in os.urandom(6))
 
-TRANSISTOR_CONTROL_PIN = board.D10
-WIFI_INDICATOR_PIN = board.D0
-MQTT_INDICATOR_PIN = board.D1
-HOLD_INDICATOR_PIN = board.D2
+IS_REVERSE_TFT = board.board_id == "adafruit_feather_esp32s3_reverse_tft"
+
+# FeatherWing J2: control=6, hold=8, MQTT=9, Wi-Fi=10. These are
+# portable Feather header labels; XIAO keeps its original independent wiring.
+TRANSISTOR_CONTROL_PIN = board.D11 if IS_REVERSE_TFT else board.D10
+WIFI_INDICATOR_PIN = board.D5 if IS_REVERSE_TFT else board.D0
+MQTT_INDICATOR_PIN = board.D6 if IS_REVERSE_TFT else board.D1
+HOLD_INDICATOR_PIN = board.D9 if IS_REVERSE_TFT else board.D2
 
 led = digitalio.DigitalInOut(board.LED)
-led.switch_to_output(value=False)  # Onboard LED is active LOW.
+led.switch_to_output(value=False)  # Preserve XIAO startup; Feather starts OFF.
+
+
+class StatusOutput:
+    """Logical indicator for screen-only status; never claims a GPIO."""
+
+    def __init__(self):
+        self.value = False
+
+    def deinit(self):
+        pass
+
+
+def make_status_output(pin):
+    if pin is None:
+        return StatusOutput()
+    return digitalio.DigitalInOut(pin)
+
 
 gate_output = None
 hold_led = None
@@ -71,6 +99,7 @@ watchdog_timer = None
 display = None
 display_onboarding = False
 display_last_status = None
+registration_phase = None
 
 
 class Platform:
@@ -219,6 +248,8 @@ def ota_service(runtime, client):
 # once the external wiring has been verified. It flashes the three candidate
 # signal pins together before Wi-Fi, MQTT, or any other controller work starts.
 def startup_pin_diagnostic():
+    if IS_REVERSE_TFT:
+        return  # D0/D1/D2 are buttons, not external LED outputs.
     pins = [digitalio.DigitalInOut(pin) for pin in (board.D0, board.D1, board.D2)]
     try:
         for output in pins:
@@ -237,11 +268,11 @@ def startup_pin_diagnostic():
 
 
 def service_status_led(wifi_connected, mqtt_connected, gate_active, now):
-    """Independent health, Wi-Fi, MQTT and hold LEDs; never touch D10 here."""
+    """Independent health, Wi-Fi, MQTT and hold LEDs; never touch gate control."""
     global hold_samples_left
     tick = application.tick if application is not None else indicators.tick
     changed, elapsed = tick(now, wifi_connected, mqtt_connected, gate_active)
-    led.value = not indicators.alive_on
+    led.value = indicators.alive_on if IS_REVERSE_TFT else not indicators.alive_on
     wifi_led.value = indicators.wifi_on
     mqtt_led.value = indicators.mqtt_on
     hold_led.value = indicators.hold_on
@@ -250,7 +281,12 @@ def service_status_led(wifi_connected, mqtt_connected, gate_active, now):
         log_event("indicator_mode", **indicator_status())
     if elapsed is not None and hold_samples_left:
         hold_samples_left -= 1
-        log_event("indicator_edge", pin="D2", on=indicators.hold_on, elapsed_ms=elapsed)
+        log_event(
+            "indicator_edge",
+            pin="D9" if IS_REVERSE_TFT else "D2",
+            on=indicators.hold_on,
+            elapsed_ms=elapsed,
+        )
 
 
 def indicator_status():
@@ -261,7 +297,7 @@ def indicator_status():
         "mqtt_led_on": mqtt_led.value,
         "alive_edge_count": indicators.alive_edges,
         "transistor_high": bool(gate_output.value),
-        "onboard_led_on": not led.value,
+        "onboard_led_on": led.value if IS_REVERSE_TFT else not led.value,
         "hold_led_on": hold_led.value,
         "hold_edge_count": indicators.hold_edges,
     }
@@ -300,7 +336,9 @@ def load_config():
 
     try:
         config = json.loads(bytes(nvm[start : start + size]).decode("utf-8"))
-        if not isinstance(config, dict) or not config.get("ssid"):
+        if not isinstance(config, dict) or not (
+            config.get("ssid") or isinstance(config.get("wifi_networks"), list)
+        ):
             return None
         return config
     except (ValueError, UnicodeError):
@@ -396,33 +434,8 @@ def scan_networks():
 
 
 def page(message="", networks=None):
-    options = ['<option value="">Choose a nearby network</option>']
-    for network in networks or []:
-        label = "{} ({}, {} dBm)".format(
-            network["ssid"], network["security"].upper(), network["rssi"]
-        )
-        options.append(
-            '<option value="{}">{}</option>'.format(
-                html_escape(network["ssid"]), html_escape(label)
-            )
-        )
-    network_options = "".join(options)
-    return """<!doctype html>
-<html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
-<title>Gate controller setup</title>
-<style>body{{font:17px sans-serif;max-width:34rem;margin:3rem auto;padding:0 1rem}}input{{box-sizing:border-box;width:100%;padding:.7rem;margin:.3rem 0 1rem}}button{{padding:.7rem 1rem}}small{{display:block;margin-top:-.7rem;margin-bottom:1rem}}</style>
-</head><body><h1>Gate controller setup</h1><p>{message}</p>
-<form action=\"/configure\" method=\"post\"><h2>Wi-Fi</h2>
-<label for=\"ssid\">Nearby open/WPA networks</label><select id=\"ssid\" name=\"ssid\">{network_options}</select>
-<button type=\"submit\" formaction=\"/scan\" formmethod=\"get\">Refresh networks</button>
-<label for=\"ssid-manual\">Hidden network name</label><input id=\"ssid-manual\" name=\"ssid_manual\" maxlength=\"32\" autofocus>
-<small>Leave Wi-Fi fields blank to keep the saved network.</small>
-<label>Wi-Fi password</label><input name=\"password\" type=\"password\" maxlength=\"63\">
-<h2>Registration</h2><p>Save Wi-Fi first. The device will show a QR code and wait for you to register it in Drawbridge. MQTT credentials are created automatically.</p>
-<button type=\"submit\">Save and connect</button></form></body></html>""".format(
-        message=message,
-        network_options=network_options,
-    )
+    saved = profiles(load_config())
+    return render_page(message, networks or [], [p["ssid"] for p in saved], device_suffix())
 
 
 def send_response(client, body, status="200 OK"):
@@ -431,29 +444,47 @@ def send_response(client, body, status="200 OK"):
         "HTTP/1.1 {}\r\nContent-Type: text/html; charset=utf-8\r\n"
         "Content-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n"
     ).format(status, len(encoded_body))
-    client.sendall(headers.encode("utf-8"))
-    client.sendall(encoded_body)
+    deadline = time.monotonic() + 10
+    for data in (headers.encode("utf-8"), encoded_body):
+        offset = 0
+        while offset < len(data):
+            if time.monotonic() >= deadline:
+                raise OSError("Portal send deadline exceeded")
+            try:
+                sent = client.send(data[offset : offset + 512])
+            except OSError as error:
+                number = getattr(error, "errno", None)
+                if number is None and error.args:
+                    number = error.args[0]
+                if number not in (11, 35):
+                    raise
+                time.sleep(0.01)
+                continue
+            if not sent:
+                raise OSError("Portal connection closed during send")
+            offset += sent
+            time.sleep(0.01)
+    # Let the ESP32 TCP stack drain queued bytes before socket close.
+    time.sleep(0.15)
+    log_event("portal_response_sent", bytes=len(encoded_body))
 
 
 def config_from_form(fields):
     previous = load_config() or {}
+    if fields.get("wifi_action") == "forget":
+        return forget_network(previous, fields.get("forget_ssid", ""))
     submitted_ssid = fields.get("ssid_manual", "").strip() or fields.get("ssid", "").strip()
-    submitted_password = fields.get("password", "")
-    ssid = submitted_ssid or previous.get("ssid", "")
-    password = (
-        submitted_password
-        if submitted_ssid and submitted_ssid != previous.get("ssid")
-        else submitted_password or previous.get("password", "")
-    )
-    if not ssid:
+    if submitted_ssid:
+        result = update_network(
+            previous,
+            submitted_ssid,
+            fields.get("password", ""),
+            open_network=fields.get("open_network") == "1",
+        )
+    elif profiles(previous):
+        result = dict(previous)
+    else:
         raise ValueError("Enter a Wi-Fi network name.")
-    if password and not 8 <= len(password) <= 63:
-        raise ValueError("Wi-Fi passwords must be 8 to 63 characters.")
-
-    result = {
-        "ssid": ssid,
-        "password": password,
-    }
     username = fields.get("mqtt_username", "").strip()
     mqtt_password = fields.get("mqtt_password", "")
     if username and mqtt_password:
@@ -519,33 +550,73 @@ def service_http(server):
     except OSError:
         return
 
+    log_event("portal_request_received")
+    stage = "read"
+    restart = False
+    started = time.monotonic()
     try:
-        client.settimeout(1)
+        client.settimeout(5)
         header, body = read_http_request(client)
         request_line = header.split(b"\r\n", 1)[0].split(b" ")
 
+        stage = "respond"
         if (
             len(request_line) >= 2
             and request_line[0] == b"POST"
             and request_line[1] == b"/configure"
         ):
-            save_config(config_from_form(parse_form(body)))
-            send_response(
-                client, page("Saved. The controller is restarting and will connect securely.")
+            fields = parse_form(body)
+            updated = config_from_form(fields)
+            save_config(updated)
+            restart = True
+            log_event("portal_config_saved", network_count=len(profiles(updated)))
+            forgotten = fields.get("wifi_action") == "forget"
+            name = (
+                fields.get("forget_ssid", "")
+                if forgotten
+                else fields.get("ssid_manual", "").strip()
+                or fields.get("ssid", "").strip()
+                or updated.get("ssid", "")
             )
-            time.sleep(1)
-            supervisor.reload()
+            stage = "send"
+            send_response(client, render_confirmation(name, forgotten))
         elif len(request_line) >= 2 and request_line[0] == b"GET" and request_line[1] == b"/scan":
+            stage = "send"
             send_response(client, page("Networks refreshed.", scan_networks()))
         else:
+            stage = "send"
             send_response(client, page(networks=scan_networks()))
-    except (OSError, UnicodeError, ValueError):
-        try:
-            send_response(client, page("Please check the fields and try again."), "400 Bad Request")
-        except OSError:
-            pass
+    except (OSError, UnicodeError, ValueError) as error:
+        log_event(
+            "portal_request_failed",
+            stage=stage,
+            error_type=type(error).__name__,
+            reason=str(error)
+            if str(error)
+            in (
+                "incomplete HTTP headers",
+                "HTTP headers too large",
+                "unsupported transfer encoding",
+                "HTTP body too large",
+                "incomplete HTTP body",
+            )
+            else "socket_or_parse_error",
+            error_number=getattr(error, "errno", None),
+            elapsed_ms=int((time.monotonic() - started) * 1000),
+        )
+        if stage != "send":
+            try:
+                send_response(
+                    client, page("Please check the fields and try again."), "400 Bad Request"
+                )
+            except OSError:
+                pass
     finally:
         client.close()
+    if restart:
+        # Complete and close HTTP before taking down the setup network.
+        time.sleep(10)
+        supervisor.reload()
 
 
 def service_dns(dns_socket, ap_ip):
@@ -595,8 +666,22 @@ def mqtt_ready(config):
     )
 
 
-def registration_request(pool, config):
-    """Ask Firebase for credentials; a 400 means the user has not claimed it."""
+def ensure_pairing_config(config):
+    if not config.get("pairing_secret"):
+        config["pairing_secret"] = "".join("{:02x}".format(v) for v in os.urandom(32))
+        save_config(config)
+    return config
+
+
+def registration_progress(config, phase):
+    global registration_phase
+    if display is not None and config.get("pairing_secret") and phase != registration_phase:
+        display.show_registration(phase, pairing_code(config["pairing_secret"]))
+        registration_phase = phase
+
+
+def registration_request(pool, config, action=None):
+    """Only the device-private proof can retrieve credentials or acknowledge."""
     if adafruit_requests is None:
         raise RuntimeError("registration_http_unavailable")
     ssl_context = ssl.create_default_context()
@@ -605,40 +690,107 @@ def registration_request(pool, config):
     session = adafruit_requests.Session(pool, ssl_context)
     response = None
     try:
-        response = session.post(REGISTRATION_ENDPOINT, json=registration_payload(device_suffix()))
-        if response.status_code == 400:
+        response = session.post(
+            REGISTRATION_ENDPOINT,
+            json=registration_payload(device_suffix(), config.get("pairing_secret"), action),
+            timeout=8 if action else 25,
+        )
+        if response.status_code in (202, 400):
             return None
         if response.status_code != 200:
-            raise OSError("registration_http_{}".format(response.status_code))
-        return apply_registration(config, response.json())
+            raise OSError("registration_http_failed")
+        data = response.json()
+        if action == "complete":
+            if data.get("state") != "registered":
+                raise ValueError("invalid registration acknowledgment")
+            return data
+        if data.get("deviceId") != device_suffix().lower():
+            raise ValueError("registration device mismatch")
+        return apply_registration(config, data)
     finally:
         if response is not None:
             response.close()
+
+
+def complete_registration(pool, config):
+    global display_onboarding, display_last_status
+    if registration_request(pool, config, "complete") is None:
+        return False
+    config["registration_acknowledged"] = True
+    save_config(config)
+    display_onboarding = False
+    display_last_status = None
+    log_event("registration_complete")
+    return True
+
+
+def connect_saved_wifi(config, service=None):
+    """Try bounded saved profiles, persisting only a changed successful choice."""
+    for network in connection_order(config, scan_networks()):
+        if service:
+            service()
+        try:
+            wifi.radio.connect(network["ssid"], network["password"], timeout=12)
+        except (OSError, RuntimeError):
+            continue
+        finally:
+            if service:
+                service()
+        if (
+            config.get("ssid") != network["ssid"]
+            or config.get("password", "") != network["password"]
+        ):
+            config.update(network)
+            save_config(config)
+        return
+    raise OSError("No saved Wi-Fi network connected")
+
+
+def setup_requested():
+    """Feather D1 is an active-high button; leave XIAO assignments alone."""
+    if not IS_REVERSE_TFT:
+        return False
+    button = digitalio.DigitalInOut(board.D1)
+    try:
+        button.switch_to_input(pull=digitalio.Pull.DOWN)
+        return bool(button.value)
+    finally:
+        button.deinit()
 
 
 def run_registration(pool, config):
     """Keep the QR screen up until the active web claim provisions MQTT."""
     global display_onboarding
     display_onboarding = True
-    if display is not None:
-        display.show_qr()
+    ensure_pairing_config(config)
+    registration_progress(config, ("Connecting", "Wi-Fi..."))
     next_attempt = 0
     while True:
         now = time.monotonic()
+        service_outputs(None, online=False)
         if now < next_attempt:
             time.sleep(0.1)
             continue
         try:
             if not wifi.radio.connected:
-                wifi.radio.connect(config["ssid"], config.get("password", ""), timeout=12)
+                registration_progress(config, ("Connecting", "Wi-Fi..."))
+                connect_saved_wifi(config, lambda: service_outputs(None, online=False))
+            registration_progress(config, ("Checking", "registration"))
             registered = registration_request(pool, config)
             if registered is not None:
                 save_config(registered)
-                display_onboarding = False
+                registration_progress(registered, ("Credentials", "saved"))
                 return registered
+            registration_progress(config, ("Scan QR", "to register"))
             next_attempt = time.monotonic() + 3
         except (OSError, RuntimeError, ValueError) as error:
-            log_event("registration_wait", error=str(error))
+            registration_progress(
+                config,
+                ("Wi-Fi retry", "Saved networks")
+                if not wifi.radio.connected
+                else ("Retrying", "registration"),
+            )
+            log_event("registration_wait", error_type=type(error).__name__)
             next_attempt = time.monotonic() + 5
 
 
@@ -771,6 +923,10 @@ def start_portal():
 
 def run_portal():
     """Serve provisioning until the submitted form resets the controller."""
+    global display_onboarding
+    display_onboarding = True
+    if display is not None:
+        display.show_setup(setup_ssid())
     _, http, dns, ap_ip = start_portal()
     while True:
         service_outputs(None, online=False)
@@ -780,7 +936,16 @@ def run_portal():
 
 def run_configured_controller(pool, config):
     """A single retry loop restores Wi-Fi before recreating the MQTT session."""
-    global hold_samples_left
+    global hold_samples_left, display_onboarding
+    needs_ack = bool(
+        config.get("pairing_secret")
+        and config.get("registration_complete")
+        and not config.get("registration_acknowledged")
+    )
+    if needs_ack:
+        display_onboarding = True
+        registration_progress(config, ("Connecting", "to MQTT..."))
+    next_registration_ack = 0
     runtime = {"command_topic": config["mqtt_command_topic"], "dirty": True}
     client = None
     next_attempt = 0
@@ -797,7 +962,7 @@ def run_configured_controller(pool, config):
                     continue
                 if not wifi.radio.connected:
                     log_event("wifi_connecting")
-                    wifi.radio.connect(config["ssid"], config["password"], timeout=12)
+                    connect_saved_wifi(config, lambda: service_outputs(runtime, online=False))
                     log_event("wifi_connected", ip=str(wifi.radio.ipv4_address))
                 service_outputs(runtime, online=False)
                 client = connect_mqtt(pool, config, runtime)
@@ -811,6 +976,17 @@ def run_configured_controller(pool, config):
                 last_status = time.monotonic()
                 log_event("heartbeat", **indicator_status())
                 hold_samples_left = 4
+            if needs_ack and now >= next_registration_ack and not hold.active(time.monotonic()):
+                registration_progress(config, ("Confirming", "connection"))
+                try:
+                    if complete_registration(pool, config):
+                        needs_ack = False
+                    else:
+                        registration_progress(config, ("Connection OK", "Retrying ack"))
+                except (OSError, RuntimeError, ValueError):
+                    log_event("registration_ack_wait")
+                    registration_progress(config, ("Connection OK", "Retrying ack"))
+                next_registration_ack = time.monotonic() + 20
             ota_service(runtime, client)
         except (ConnectionError, MQTT.MMQTTException, OSError) as error:
             # ValueError is a programming/configuration error, not a network failure.
@@ -837,22 +1013,29 @@ def main():
             MQTT_INDICATOR_PIN,
             HOLD_INDICATOR_PIN,
         ):
-            output = digitalio.DigitalInOut(pin)
+            output = make_status_output(pin)
             outputs.append(output)
-            output.switch_to_output(value=False)
+            if pin is not None:
+                output.switch_to_output(value=False)
             if pin is TRANSISTOR_CONTROL_PIN:
-                # TEMPORARY diagnostic; D10 is already LOW and never blinks.
+                # TEMPORARY diagnostic; gate control is already LOW and never blinks.
                 startup_pin_diagnostic()
         gate_output, wifi_led, mqtt_led, hold_led = outputs
+        force_setup = setup_requested()
         config = add_settings_credentials(load_config())
         # Provisioning may run indefinitely; do not trial an app/start its
         # watchdog until saved Wi-Fi/MQTT settings are available.
-        initialize_application(allow_ota=bool(config and mqtt_ready(config)))
+        initialize_application(
+            allow_ota=bool(not force_setup and profiles(config) and mqtt_ready(config))
+        )
         service_outputs(None, online=False)
-        if config and mqtt_ready(config):
+        if force_setup or not profiles(config):
+            log_event("provisioning", requested=force_setup)
+            run_portal()
+        elif config and mqtt_ready(config):
             pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
             run_configured_controller(pool, config)
-        elif config and config.get("ssid"):
+        elif profiles(config):
             log_event("registration")
             pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
             config = run_registration(pool, config)
@@ -875,7 +1058,7 @@ def main():
         for output in outputs:
             output.value = False
             output.deinit()
-        led.value = True  # Active-low heartbeat stops when the program exits.
+        led.value = False if IS_REVERSE_TFT else True  # Heartbeat off on exit.
         led.deinit()
         if watchdog_timer:
             # Output cleanup must run even if a port cannot disable its watchdog.

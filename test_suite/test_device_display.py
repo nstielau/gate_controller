@@ -2,9 +2,11 @@ import importlib.util
 import pathlib
 import sys
 import unittest
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 
-sys.path.insert(0, str(pathlib.Path(__file__).parents[1] / "circuitpython" / "lib"))
+sys.path.append(str(pathlib.Path(__file__).parents[1] / "circuitpython" / "lib"))
 
 MODULE_PATH = pathlib.Path(__file__).parents[1] / "circuitpython" / "lib" / "device_display.py"
 spec = importlib.util.spec_from_file_location("device_display", MODULE_PATH)
@@ -27,11 +29,60 @@ class DisplayTests(unittest.TestCase):
         })
         self.assertEqual(state.status(wifi=True, mqtt=True, hold=True)["mode"], "status")
 
+    def test_registration_qr_is_on_right_with_d1_hint_on_left(self):
+        display = SimpleNamespace(width=240, height=135, root_group=None)
+        renderer = module.ReverseTFT(display, "ab12cd")
+        tile = MagicMock()
+        labels = MagicMock()
+        drawing = SimpleNamespace(Group=list, Bitmap=lambda *args: {}, Palette=lambda *args: {}, TileGrid=tile)
+        text = SimpleNamespace(label=SimpleNamespace(Label=labels))
+        with patch.dict(sys.modules, {"displayio": drawing, "terminalio": SimpleNamespace(FONT=None), "adafruit_display_text": text}), patch.object(module, "qr_matrix", return_value=[[False]*41 for _ in range(41)]):
+            renderer.show_qr()
+        self.assertGreater(tile.call_args.kwargs["x"], 120)
+        strings = [c.kwargs["text"] for c in labels.call_args_list]
+        self.assertIn("D1 + RESET", strings)
+        self.assertIn("Add Wi-Fi", strings)
+        calls = {c.kwargs["text"]: c.kwargs for c in labels.call_args_list}
+        qr = tile.call_args.kwargs
+        title = calls["Scan to Register"]
+        code = calls["ab12cd"]
+        self.assertLess(title["anchored_position"][1], qr["y"])
+        self.assertGreater(code["anchored_position"][1], qr["y"] + 86)
+        self.assertEqual(code["scale"], 2)
+        self.assertEqual(title["anchored_position"][0], code["anchored_position"][0])
+        self.assertEqual(calls["D1 + RESET"]["x"], 4)
+
     def test_qr_matrix_is_square_and_has_quiet_zone(self):
         matrix = module.qr_matrix("https://drawbridge-45487.firebaseapp.com/?device_id=ab12cd")
         self.assertEqual(len(matrix), len(matrix[0]))
         self.assertGreaterEqual(len(matrix), 21)
-        self.assertTrue(all(not any(row[:2]) for row in matrix[:2]))
+        self.assertTrue(all(not any(row) for row in matrix[:4] + matrix[-4:]))
+        self.assertTrue(all(not any(row[:4] + row[-4:]) for row in matrix))
+
+    def test_secure_qr_uses_only_derived_code_and_fits_small_screen(self):
+        code = "a" * 64
+        url = module.registration_qr_url("ab12cd", code)
+        self.assertEqual(url, "https://drawbridge.stielau.us/?d=ab12cd#p=" + code)
+        self.assertLessEqual(len(url), 106)
+        with self.assertRaises(ValueError):
+            module.registration_qr_url("ab12cd", "invalid")
+
+    def test_normal_status_has_brand_and_separate_readable_rows(self):
+        labels = MagicMock()
+        display = SimpleNamespace(width=240, height=135, root_group=None)
+        drawing = SimpleNamespace(Group=list, Bitmap=lambda *args: {}, Palette=lambda *args: {}, TileGrid=MagicMock())
+        text = SimpleNamespace(label=SimpleNamespace(Label=labels))
+        renderer = module.ReverseTFT(display, "ab12cd")
+        with patch.dict(sys.modules, {"displayio": drawing, "terminalio": SimpleNamespace(FONT=None), "adafruit_display_text": text}):
+            renderer.show_status(wifi=True, mqtt=False, hold=True)
+        calls = {c.kwargs["text"]: c.kwargs for c in labels.call_args_list}
+        self.assertIn("Drawbridge", calls)
+        self.assertIn("Connected", calls)
+        self.assertIn("Reconnecting", calls)
+        self.assertIn("ON", calls)
+        self.assertEqual(len({calls[t]["y"] for t in ("Wi-Fi", "MQTT", "Hold")}), 3)
+        self.assertTrue(all(32 < calls[t]["y"] < 123 for t in ("Wi-Fi", "MQTT", "Hold")))
+        self.assertEqual(calls["ON"]["color"], 0x173F35)
 
 
 if __name__ == "__main__":

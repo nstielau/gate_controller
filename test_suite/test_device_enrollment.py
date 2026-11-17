@@ -32,7 +32,7 @@ class EnrollmentTests(unittest.TestCase):
         ])
 
     def test_registration_payload_and_response_are_bounded(self):
-        self.assertEqual(module.registration_payload("AB12CD"), {"device_id": "ab12cd"})
+        self.assertEqual(module.registration_payload("AB12CD", "01"*32)["device_id"], "ab12cd")
         parsed = module.parse_registration_response({
             "deviceId": "ab12cd", "username": "gate-ab12cd", "password": "pw", # pragma: allowlist secret
             "brokerHost": "broker.example", "brokerPort": 8883,
@@ -57,3 +57,23 @@ class EnrollmentTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class SecurePairingTests(unittest.TestCase):
+    def test_public_pairing_code_cannot_be_used_as_private_device_proof(self):
+        import hashlib
+        secret = "01" * 32
+        public = module.pairing_code(secret)
+        self.assertEqual(public, hashlib.sha256(secret.encode()).hexdigest())
+        self.assertNotEqual(public, secret)
+        self.assertEqual(module.registration_payload("AB12CD", secret), {"device_id": "ab12cd", "device_secret": secret})
+        self.assertEqual(module.registration_payload("AB12CD", secret, "complete")["action"], "complete")
+        for invalid in (None, "", "x"*64, "a"*63):
+            with self.assertRaises(ValueError):
+                module.registration_payload("ab12cd", invalid)
+
+    def test_registration_application_preserves_private_secret_for_ack_and_recovery(self):
+        config = {"ssid": "Home", "pairing_secret": "01"*32, "wifi_networks": [{"ssid":"Home", "password":"test-pass"}]}
+        result = module.apply_registration(config, {"deviceId":"ab12cd", "username":"gate-ab12cd", "password":"example", "commandTopic":"gate/v1/devices/ab12cd/command", "statusTopic":"gate/v1/devices/ab12cd/status"}) # pragma: allowlist secret
+        self.assertEqual(result["pairing_secret"], config["pairing_secret"])
+        self.assertFalse(result["registration_acknowledged"])
+        self.assertEqual(result["wifi_networks"], config["wifi_networks"])

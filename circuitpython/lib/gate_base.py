@@ -1,3 +1,3 @@
 """USB-managed bundle identity. OTA applications must never change this version."""
 
-BASE_VERSION = "1.0.2"
+BASE_VERSION = "1.0.11"

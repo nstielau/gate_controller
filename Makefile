@@ -97,6 +97,9 @@ web-status:
 web-secrets:
 	$(PYTHON) tools/firebase_cloud.py secrets
 
+device-pairing-enroll:
+	$(PYTHON) tools/enroll_pairing.py --port "$(PORT)"
+
 web-grant:
 	@test -n "$(EMAIL)" || (echo 'Usage: make web-grant EMAIL=user@example.com [DEVICE_ID=b3640c]'; exit 1)
 	node_modules/.bin/node firebase/functions/admin.cjs grant "$(EMAIL)" "$(or $(DEVICE_ID),b3640c)"

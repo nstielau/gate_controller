@@ -44,8 +44,29 @@ def visible_networks(entries):
     return sorted(strongest.values(), key=lambda item: (-item["rssi"], item["ssid"]))
 
 
-def registration_payload(device_id):
-    return {"device_id": normalize_device_id(device_id)}
+def validate_pairing_secret(secret):
+    if (not isinstance(secret, str) or len(secret) != 64
+            or any(c not in "0123456789abcdef" for c in secret)):
+        raise ValueError("invalid pairing proof")
+    return secret
+
+
+def pairing_code(secret):
+    # CircuitPython provides hashlib.new(), rather than hashlib.sha256().
+    import hashlib
+    digest = hashlib.new("sha256")
+    digest.update(validate_pairing_secret(secret).encode("utf-8"))
+    return "".join("{:02x}".format(value) for value in digest.digest())
+
+
+def registration_payload(device_id, secret=None, action=None):
+    result = {"device_id": normalize_device_id(device_id),
+              "device_secret": validate_pairing_secret(secret)}
+    if action is not None:
+        if action != "complete":
+            raise ValueError("invalid registration action")
+        result["action"] = action
+    return result
 
 
 def parse_registration_response(body):
@@ -81,4 +102,5 @@ def apply_registration(config, body):
     result.update(parse_registration_response(body))
     result.pop("registration_pending", None)
     result["registration_complete"] = True
+    result["registration_acknowledged"] = False
     return result

@@ -118,6 +118,15 @@
 
 # Runtime and pins
 
+- Reverse TFT Feather + FeatherWing USB firmware uses transistor control
+  D11/GPIO11, Wi-Fi D5/GPIO5, MQTT D6/GPIO6 and Hold D9/GPIO9. These match
+  J2 pins 6/10/9/8 in `hardware/featherwing/generate.py`. D0/D1/D2 are buttons;
+  never drive them as indicator outputs. Feather onboard LED is active HIGH.
+  The following D10/D0/D1/D2 mapping applies to XIAO. Feather OTA remains
+  unsupported. J3 is open collector: active control sinks OUT_OC to GND and
+  does not provide a HIGH output voltage. Use `TEST_ARGS='--hold-pin D9'` with
+  passive hardware checks on Feather.
+
 - Current firmware initializes transistor control `board.D10` (**GPIO9**) LOW.
   A valid timed MQTT hold raises D10 steadily until monotonic expiry or exit.
   D9 is the optional OTA maintenance input. Indicator servicing must never toggle D10.

@@ -255,3 +255,34 @@ logs. Do not treat host filesystem fault simulation as physical flash testing.
 After bench validation, target one canary device and observe it for a week
 before expanding. Channel-wide promotion and signed manifests remain future
 work; this implementation provides explicit per-device assignments.
+
+## Multiple local Wi-Fi networks (USB base 1.0.4)
+
+On the Reverse TFT Feather, hold **D1**, press/release **RESET**, then release
+D1 once the setup screen appears. Join `Gate-Setup-<chip suffix>` and open
+`http://192.168.4.1`. Add a nearby or manually entered network, then Save and
+connect. Up to five networks are retained. Select a saved name to update its
+password; blank keeps the existing password, while Open network explicitly
+clears it. Forget removes only that network. The portal never displays saved
+passwords, and adding a network preserves device registration/MQTT identity.
+
+Startup scans for saved networks, prefers the last successful visible network,
+and tries other saved networks if connection fails, including hidden networks.
+No-network configuration opens setup. Failure of saved networks keeps retrying
+station mode; it never automatically opens an AP. Gate commands are inactive
+while the explicit setup portal is open. D1 setup entry is Feather-only; XIAO
+pin assignments and OTA recovery via D9 remain unchanged.
+
+### FeatherWing outputs (USB base 1.0.11)
+
+The Reverse TFT Feather uses the fabricated Wing's portable header mapping:
+Wi-Fi D5/GPIO5, MQTT D6/GPIO6, green Hold D9/GPIO9, transistor control
+D11/GPIO11. D0/D1/D2 remain buttons. These outputs are initialized LOW and
+cleaned up LOW on exit. The green indicator flashes at 4 Hz during an active
+hold; transistor control stays steadily HIGH until the lease expires.
+J3 OUT_OC sinks toward ground during activation; it is not a voltage source
+or isolated contact. Keep physical gate-interface qualification separate.
+
+Run passive verification with `make test-hardware TEST_ARGS='--hold-pin D9'`.
+It does not publish commands or measure terminal voltage. Feather uses USB
+updates only; this mapping does not enable Feather OTA.

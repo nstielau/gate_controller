@@ -9,14 +9,17 @@ export async function createGateway() {
     ? [] : [{id: "test-device", name: "Garden gate"}, {id: "second-device", name: "Driveway"}];
   return {
     async createDeviceClaim(data) {
-      window.__claims ||= []; window.__claims.push({deviceId: data.deviceId.trim().toLowerCase()});
+      window.__claims ||= []; window.__claims.push({...data});
+      if (scenario === "claim-delayed") await new Promise(resolve => { window.__releaseClaim = resolve; });
+      if (scenario === "claim-owned") throw Object.assign(new Error("Device already registered. Ask its owner for access."), {code: "functions/permission-denied"});
       return {deviceId: data.deviceId.trim().toLowerCase(), state: "pending", expiresAtMs: Date.now() + 7200000};
     },
     async deviceClaimStatus(data) {
       claimPolls++;
       window.__claimPolls = claimPolls;
       if (scenario === "claim-expired") return {deviceId: data.deviceId, state: "expired", expiresAtMs: Date.now() - 1};
-      if (scenario === "claim-success" && claimPolls >= 2) {
+      if (scenario === "claim-success" && claimPolls === 2) return {deviceId: data.deviceId, state: "provisioning"};
+      if (scenario === "claim-success" && claimPolls >= 3) {
         if (!devices.some(device => device.id === data.deviceId)) devices.push({id: data.deviceId, name: data.deviceId});
         return {deviceId: data.deviceId, state: "registered"};
       }
@@ -43,8 +46,8 @@ export async function createGateway() {
       if (data.action === "pauseFirmware") window.__target = {enabled: false, sequence: 2};
       return {ok: true};
     },
-    onUser(fn) { callback = fn; fn(scenario === "signed-out" ? null : {email: "operator@example.test", photoURL: "https://example.test/profile.jpg"}); },
-    async signIn() { callback({email: "operator@example.test", photoURL: "https://example.test/profile.jpg"}); },
+    onUser(fn) { callback = fn; fn((scenario === "signed-out" || (scenario === "claim-login-redirect" && !sessionStorage.getItem("test.signedIn"))) ? null : {email: "operator@example.test", photoURL: "https://example.test/profile.jpg"}); },
+    async signIn() { if (scenario === "claim-login-redirect") { sessionStorage.setItem("test.signedIn", "1"); location.assign("/"); return; } callback({email: "operator@example.test", photoURL: "https://example.test/profile.jpg"}); },
     async signOut() { callback(null); },
     async listDevices() {
       if (scenario === "loading") await new Promise(resolve => { window.__releaseDevices = resolve; });

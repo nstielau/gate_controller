@@ -58,7 +58,7 @@
   <section id="signed-out-hero" class="signed-out-hero" hidden aria-labelledby="signed-out-title">
     <img class="castle-hero" src="/assets/drawbridge-castle.png" alt="">
     <h1 id="signed-out-title">DRAWBRIDGE</h1>
-    <p>Secure, timed access to your gate.</p>
+    <p id="signed-out-message">Secure, timed access to your gate.</p>
     <button id="sign-in">Login with Google</button>
   </section>
   <section id="loading-state" class="loading-state" role="status" aria-live="polite" aria-labelledby="loading-message">
@@ -72,15 +72,17 @@
   </section>
   <p id="user-state" hidden></p>
   <section id="device-onboarding" hidden aria-labelledby="device-onboarding-heading">
-    <h2 id="device-onboarding-heading">Add a device</h2>
-    <p class="hint">Enter the device ID shown on its setup screen.</p>
-    <form id="device-onboarding-form">
+    <h2 id="device-onboarding-heading">Register your device</h2>
+    <p id="device-onboarding-hint" class="hint">Scan a fresh QR code on the device's setup screen. A device ID alone cannot register a gate.</p>
+    <form id="device-onboarding-form" hidden>
       <label for="device-onboarding-id">Device ID</label>
-      <input id="device-onboarding-id" name="deviceId" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" required aria-describedby="device-onboarding-hint">
-      <p id="device-onboarding-hint" class="hint">Use lowercase letters, numbers, and hyphens.</p>
-      <button id="device-claim" type="submit">Start registration</button>
+      <input id="device-onboarding-id" name="deviceId" readonly aria-describedby="device-onboarding-hint">
+      <label for="device-onboarding-nickname">Gate nickname (optional)</label>
+      <input id="device-onboarding-nickname" name="nickname" maxlength="80" autocomplete="off" placeholder="For example, Driveway">
+      <button id="device-claim" type="submit">Register device</button>
     </form>
-    <p id="device-onboarding-status" role="status" aria-live="polite">Enter the device ID to start.</p>
+    <p id="device-onboarding-status" role="status" aria-live="polite">Scan a fresh QR code on the device's setup screen.</p>
+    <button id="device-onboarding-cancel" class="quiet" type="button">Cancel registration</button>
   </section>
   <section id="controls" hidden aria-labelledby="hold-heading">
     <label for="device">Your gate</label><select id="device"></select>

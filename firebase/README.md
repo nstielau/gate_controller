@@ -52,6 +52,18 @@ independent reporting. See [OTA operations](../docs/ota-operations.md).
 
 ## Architecture and behavior
 
+New USB boards use a private NVM pairing proof and a derived SHA-256 code in
+their QR fragment. After installing the current USB bundle, enroll the attached
+board once with `make device-pairing-enroll PORT=/dev/cu.usbmodem...` using the
+project's IAM account. This deliberately stops/restarts the application and
+creates a server-only `devicePairingBindings/<id>` public hash. It refuses to
+replace a different existing identity. Neither the private proof nor MQTT
+credentials leave USB in this step. No public API can establish this binding.
+Then scan the board QR, sign in, and confirm **Register** (nickname optional).
+The browser waits while the board retrieves its encrypted/retryable credentials,
+saves them and subscribes to MQTT. Controls become available after its final
+acknowledgment. Browser registration never publishes a gate command.
+
 Firebase Hosting serves bundled HTML/JS/CSS. Google Authentication identifies
 the user; reCAPTCHA Enterprise App Check protects all callable functions.
 `listDevices` returns assigned, enabled gates. `holdGate` checks verified Google

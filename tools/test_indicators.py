@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Passively verify four indicator states and D2 timing without changing D10."""
+"""Passively verify indicator states and hold timing without changing control."""
 
 import argparse
 import json
@@ -44,7 +44,7 @@ def run(args):
                             event.get(key)
                             for key in ("wifi_connected", "wifi_led_on", "mqtt_led_on")
                         ):
-                            raise AssertionError("Expected connected Wi-Fi/D0 and MQTT/D1 LEDs ON")
+                            raise AssertionError("Expected connected Wi-Fi and MQTT LEDs ON")
                         alive_edges = event["alive_edge_count"]
                         if (
                             last_alive_edges is not None
@@ -56,7 +56,7 @@ def run(args):
                             last_alive_change = time.monotonic()
                         last_alive_edges = alive_edges
                         if not event["transistor_high"] and event["hold_led_on"]:
-                            raise AssertionError("D2 must be OFF without a hold")
+                            raise AssertionError("Hold LED must be OFF without a hold")
                         if boot_id is None:
                             boot_id = event["boot_id"]
                             started = time.monotonic()
@@ -66,21 +66,21 @@ def run(args):
                         previous_sample = None  # logging samples are separated by unlogged edges
                         heartbeats += 1
                         print(
-                            "Connected: D0/D1 ON, alive edges {}, D10 {}, D2 edges {}".format(
+                            "Connected: Wi-Fi/MQTT ON, alive edges {}, control {}, hold edges {}".format(
                                 alive_edges, "HIGH" if event["transistor_high"] else "LOW", edges
                             ),
                             flush=True,
                         )
                     elif boot_id is not None and event["event"] == "indicator_edge":
-                        if event.get("pin") != "D2":
+                        if event.get("pin") != args.hold_pin:
                             raise AssertionError("Unexpected indicator pin")
                         elapsed = event["elapsed_ms"]
                         if not 125 <= elapsed <= 200:
                             raise AssertionError(
-                                "D2 transition took {} ms; expected 125–200 ms".format(elapsed)
+                                "Hold transition took {} ms; expected 125–200 ms".format(elapsed)
                             )
                         if previous_sample is not None and event["on"] == previous_sample:
-                            raise AssertionError("D2 samples did not alternate")
+                            raise AssertionError("Hold LED samples did not alternate")
                         previous_sample = event["on"]
                         samples.append(elapsed)
                     elif boot_id is not None and event["event"] == "indicator_mode":
@@ -99,7 +99,7 @@ def run(args):
     finally:
         args.log.with_suffix(".json").write_text(json.dumps(summary, indent=2) + "\n")
     print(
-        "PASS: {} s, {} heartbeats, {} D2 samples; logs {}".format(
+        "PASS: {} s, {} heartbeats, {} hold samples; logs {}".format(
             args.duration, heartbeats, len(samples), args.log
         )
     )
@@ -109,6 +109,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", help="USB serial device; auto-detected by default")
     parser.add_argument("--duration", type=float, default=70)
+    parser.add_argument(
+        "--hold-pin", choices=["D2", "D9"], default="D2", help="XIAO D2 (default), FeatherWing D9"
+    )
     parser.add_argument(
         "--timeout", type=float, default=40, help="Seconds to wait for first online heartbeat"
     )

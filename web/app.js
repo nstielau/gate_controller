@@ -1,8 +1,14 @@
 import {createAdminView} from "./admin.js";
 import {createGateway} from "./gateway.js";
+import {capturePairingIntent, savePairingIntent, validPairingIntent} from "./pairing.mjs";
 const $ = selector => document.querySelector(selector);
 const state = $("#user-state"), controls = $("#controls"), result = $("#result");
-const scannedDeviceId = new URL(location.href).searchParams.get("device_id")?.trim().toLowerCase() || "";
+// The alias redirect must carry the fragment to the canonical origin, whose
+// session storage will survive Google's redirect. Capture there before auth starts.
+const initialUrl = new URL(location.href);
+const aliasOrigin = ["drawbridge-45487.web.app", "drawbridge.stielau.us"].includes(initialUrl.hostname);
+let pairingIntent = aliasOrigin ? null : capturePairingIntent({href: location.href, storage: sessionStorage, replace: url => history.replaceState(null, "", url)});
+let scanRequested = initialUrl.searchParams.has("device_id") || initialUrl.searchParams.has("d") || !!pairingIntent;
 const buttons = [...document.querySelectorAll("[data-duration]")];
 let gateway, user, busy = false, devices = [], generation = 0;
 let savingNickname = false;
@@ -45,46 +51,75 @@ function stopClaimPolling() {
   clearInterval(claimTimer);
   claimTimer = undefined;
 }
+function clearPairing() {
+  pairingIntent = null;
+  scanRequested = false;
+  savePairingIntent(sessionStorage, null);
+  const url = new URL(location.href);
+  url.searchParams.delete("device_id");
+  url.searchParams.delete("d");
+  history.replaceState(null, "", url);
+}
 function closeOnboarding() {
   stopClaimPolling();
+  claiming = false;
   $("#device-onboarding").hidden = true;
-  $("#device-onboarding-status").textContent = "Enter the device ID to start.";
 }
 function openOnboarding(focus = true) {
   closeNickname();
   closeInvite();
   adminView.close();
   controls.hidden = true;
+  state.hidden = true;
   $("#admin-view").hidden = true;
   $("#device-onboarding").hidden = false;
-  if (/^[a-z0-9-]{1,64}$/.test(scannedDeviceId) && !$("#device-onboarding-id").value) {
-    $("#device-onboarding-id").value = scannedDeviceId;
-  }
-  if (focus) $("#device-onboarding-id").focus();
+  const valid = validPairingIntent(pairingIntent);
+  $("#device-onboarding-form").hidden = !valid;
+  $("#device-onboarding-id").value = valid ? pairingIntent.deviceId : "";
+  $("#device-onboarding-nickname").value = valid ? pairingIntent.nickname || "" : "";
+  $("#device-onboarding-status").textContent = valid
+    ? "Confirm registration for this device. Keep it connected while setup finishes."
+    : "Scan a fresh QR code on the device's setup screen. A device ID alone cannot register a gate.";
+  if (focus && valid) $("#device-onboarding-nickname").focus();
+  render();
 }
 function claimStatusMessage(status) {
-  if (status.state === "pending") return "Waiting for the device to register…";
-  if (status.state === "registered") return "Device registered. Loading access…";
-  if (status.state === "expired") return "This claim expired. Start registration again.";
-  return "No active claim found. Start registration again.";
+  if (status.state === "pending") return "Waiting for the device to start registration…";
+  if (status.state === "provisioning") return "Setting up the device. Waiting for it to confirm connection…";
+  if (status.state === "registered") return "Device confirmed registration. Loading access…";
+  if (status.state === "expired") return "This registration expired. Register again or scan a fresh QR code.";
+  return "No active registration found. Register again or scan a fresh QR code.";
 }
-async function pollClaim(deviceId, current) {
+async function finishRegistration(deviceId) {
+  clearPairing();
+  closeOnboarding();
+  await loadDevices(deviceId);
+}
+async function pollClaim(intent, current) {
+  if (current !== generation || !claiming || $("#device-onboarding").hidden) return;
   try {
-    const status = await gateway.deviceClaimStatus({deviceId});
-    if (current !== generation || $("#device-onboarding").hidden) return;
-    $("#device-onboarding-status").textContent = claimStatusMessage(status);
-    if (status.state === "registered") {
-      stopClaimPolling();
-      claiming = false;
-      await loadDevices();
-    } else if (status.state !== "pending") {
-      stopClaimPolling();
-      claiming = false;
-      render();
+    if (!validPairingIntent(intent)) {
+      stopClaimPolling(); claiming = false;
+      $("#device-onboarding-status").textContent = "This QR code session expired. Scan a fresh QR code on the device.";
+      $("#device-onboarding-form").hidden = true;
+      clearPairing(); render(); return;
+    }
+    if (navigator.onLine) {
+      const status = await gateway.deviceClaimStatus({deviceId: intent.deviceId, pairingCode: intent.pairingCode});
+      if (current !== generation || !claiming || $("#device-onboarding").hidden) return;
+      $("#device-onboarding-status").textContent = claimStatusMessage(status);
+      if (status.state === "registered") { await finishRegistration(intent.deviceId); return; }
+      if (!["pending", "provisioning"].includes(status.state)) {
+        stopClaimPolling(); claiming = false;
+        pairingIntent.submitted = false;
+        savePairingIntent(sessionStorage, pairingIntent);
+        render(); return;
+      }
     }
   } catch {
-    if (current === generation) $("#device-onboarding-status").textContent = "Couldn't check registration. We'll keep trying.";
+    if (current === generation && claiming) $("#device-onboarding-status").textContent = "Couldn't check registration. We'll keep trying when connected.";
   }
+  if (current === generation && claiming) claimTimer = setTimeout(() => pollClaim(intent, current), 3000);
 }
 function closeAccountMenu() {
   closeNickname();
@@ -165,12 +200,13 @@ function render() {
   $("#sign-out").disabled = working;
   $("#refresh").disabled = working || !online;
   $("#add-device").disabled = working || !online;
-  $("#device-claim").disabled = claiming || !online || !user;
-  $("#device-onboarding-id").disabled = claiming;
+  $("#device-claim").disabled = claiming || !online || !user || !validPairingIntent(pairingIntent);
+  $("#device-onboarding-nickname").disabled = claiming;
   $("#update").disabled = working;
   renderHold();
 }
-async function loadDevices() {
+async function loadDevices(preferredId) {
+  claiming = false;
   closeNickname();
   closeInvite();
   stopClaimPolling();
@@ -190,14 +226,24 @@ async function loadDevices() {
     gateway.adminSession().then(session => {
       if (current === generation) $("#admin-open").hidden = !session.isAdmin;
     }).catch(() => {});
-    const previousId = $("#device").value;
+    const previousId = preferredId || $("#device").value;
     $("#device").replaceChildren(...devices.map(device => new Option(device.name, device.id)));
     if (devices.some(device => device.id === previousId)) $("#device").value = previousId;
     controls.hidden = devices.length === 0;
     state.hidden = devices.length > 0;
     state.textContent = devices.length ? "" : "No gate access yet. Add a device or ask the administrator to add " + user.email + ".";
-    if (devices.length) closeOnboarding();
-    else openOnboarding(false);
+    const existingScan = pairingIntent && devices.some(device => device.id === pairingIntent.deviceId);
+    if (existingScan) {
+      $("#device").value = pairingIntent.deviceId;
+      clearPairing();
+      closeOnboarding();
+    } else if (pairingIntent || scanRequested || !devices.length) {
+      openOnboarding(false);
+      if (pairingIntent?.submitted) {
+        claiming = true; render();
+        pollClaim(pairingIntent, current);
+      }
+    } else closeOnboarding();
   } catch (error) {
     if (current !== generation) return;
     state.hidden = false;
@@ -209,28 +255,41 @@ async function loadDevices() {
 $("#account-menu-button").onclick = toggleAccountMenu;
 $("#refresh").onclick = () => { closeAccountMenu(); loadDevices(); };
 $("#add-device").onclick = () => { closeAccountMenu(); openOnboarding(); };
+$("#device-onboarding-cancel").onclick = () => {
+  ++generation;
+  clearPairing(); closeOnboarding();
+  controls.hidden = !user || !devices.length;
+  state.hidden = !!devices.length;
+  render();
+};
 $("#device").onchange = () => { closeNickname(); closeInvite(); renderHold(); renderDeviceMetric(); };
 $("#device-onboarding-form").onsubmit = async event => {
   event.preventDefault();
   if (claiming || !navigator.onLine || !user) return;
-  const deviceId = $("#device-onboarding-id").value.trim().toLowerCase();
-  if (!/^[a-z0-9-]{1,64}$/.test(deviceId)) {
-    $("#device-onboarding-status").textContent = "Use lowercase letters, numbers, and hyphens only.";
-    return;
+  if (!validPairingIntent(pairingIntent)) {
+    $("#device-onboarding-status").textContent = "Scan a fresh QR code on the device's setup screen.";
+    $("#device-onboarding-form").hidden = true;
+    clearPairing(); render(); return;
   }
+  const intent = pairingIntent;
+  const nickname = $("#device-onboarding-nickname").value.trim();
   claiming = true;
   const current = generation;
   $("#device-onboarding-status").textContent = "Starting registration…";
   render();
   try {
-    await gateway.createDeviceClaim({deviceId});
+    const status = await gateway.createDeviceClaim({deviceId: intent.deviceId, pairingCode: intent.pairingCode, ...(nickname ? {nickname} : {})});
     if (current !== generation) return;
-    $("#device-onboarding-status").textContent = "Waiting for the device to register…";
-    await pollClaim(deviceId, current);
-    if (claiming) claimTimer = setInterval(() => pollClaim(deviceId, current), 3000);
+    intent.submitted = true;
+    intent.nickname = nickname;
+    savePairingIntent(sessionStorage, intent);
+    if (status.state === "registered") { await finishRegistration(intent.deviceId); return; }
+    $("#device-onboarding-status").textContent = claimStatusMessage(status);
+    await pollClaim(intent, current);
   } catch (error) {
+    if (current !== generation) return;
     claiming = false;
-    const rejected = ["permission-denied", "unauthenticated", "invalid-argument", "failed-precondition"]
+    const rejected = ["permission-denied", "unauthenticated", "invalid-argument", "failed-precondition", "already-exists", "resource-exhausted"]
       .some(code => error.code === "functions/" + code);
     $("#device-onboarding-status").textContent = rejected ? error.message : "Couldn't start registration. Try again.";
     render();
@@ -348,7 +407,14 @@ try {
     $("#signed-out-hero").hidden = !!user;
     $("#account-menu-button").hidden = !user;
     if (!user) closeAccountMenu();
-    if (!user) { ++generation; devices = []; claiming = false; closeOnboarding(); controls.hidden = true; hideLoading(); state.hidden = false; state.textContent = "Sign in to control your gate."; render(); }
+    if (!user) {
+      ++generation; devices = []; closeOnboarding(); controls.hidden = true; hideLoading();
+      const scanMessage = pairingIntent ? `Sign in with Google to register device ${pairingIntent.deviceId}. Your scan will be saved while you sign in.` : "Secure, timed access to your gate.";
+      $("#signed-out-message").textContent = scanMessage;
+      state.hidden = !!pairingIntent;
+      state.textContent = "Sign in to control your gate.";
+      render();
+    }
     else loadDevices();
   });
   render();

@@ -376,38 +376,128 @@ test("firmware shows independently reported base and app versions, including leg
   await expect(page.locator("#admin-devices")).toContainText("App 1.0.9 · Base not reported");
 });
 
-test("first login can claim a device and polling loads access when registration completes", async ({page}) => {
-  await page.addInitScript(() => { window.__scenario = "claim-success"; });
-  await page.goto("/");
+const pairingCode = "a".repeat(64);
+const scanUrl = id => `/?device_id=${id}#pair=${pairingCode}`;
+
+test("QR registration requires confirmation even when the user already owns gates", async ({page}) => {
+  await page.goto(scanUrl("AB12CD"));
   await expect(page.locator("#device-onboarding")).toBeVisible();
-  await expect(page.locator("#device-onboarding-status")).toHaveText(/enter the device ID/i);
-  await page.locator("#device-onboarding-id").fill(" AB12CD ");
+  await expect(page.locator("#controls")).toBeHidden();
+  await expect(page.locator("#device-onboarding-id")).toHaveValue("ab12cd");
+  await expect(page.locator("#device-onboarding-id")).toHaveAttribute("readonly", "");
+  expect(new URL(page.url()).hash).toBe("");
+  expect(await page.evaluate(() => window.__claims || [])).toEqual([]);
+  await page.locator("#device-onboarding-nickname").fill("  Side gate  ");
   await page.locator("#device-claim").click();
-  await expect(page.locator("#device-claim")).toBeDisabled();
-  await expect(page.locator("#device-onboarding-status")).toHaveText(/waiting/i);
+  await expect(page.locator("#device-onboarding-status")).toContainText("Waiting for the device");
+  expect(await page.evaluate(() => window.__claims)).toEqual([{deviceId: "ab12cd", pairingCode, nickname: "Side gate"}]);
+  expect(await page.evaluate(() => window.__commands || [])).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("first registration waits through provisioning until the device acknowledges setup", async ({page}) => {
+  await page.addInitScript(() => { window.__scenario = "claim-success"; });
+  await page.goto(scanUrl("ab12cd"));
+  await page.locator("#device-claim").click();
+  await expect(page.locator("#device-onboarding-status")).toContainText("Waiting for the device");
+  await expect(page.locator("#device-onboarding-status")).toContainText("confirm", {timeout: 5000});
+  await expect(page.locator("#controls")).toBeHidden();
   await expect(page.locator("#controls")).toBeVisible({timeout: 5000});
-  expect(await page.evaluate(() => window.__claims)).toEqual([{deviceId: "ab12cd"}]);
+  await expect(page.locator("#device")).toHaveValue("ab12cd");
+  expect(await page.evaluate(() => sessionStorage.getItem("drawbridge.pairing"))).toBeNull();
   expect(await page.evaluate(() => window.__commands || [])).toEqual([]);
 });
 
-test("add-device menu opens onboarding and expired claims stop polling", async ({page}) => {
-  await page.addInitScript(() => { window.__scenario = "claim-expired"; });
+test("signed-out QR scan explains registration and survives Google redirect without query parameters", async ({page}) => {
+  await page.addInitScript(() => { window.__scenario = "claim-login-redirect"; });
+  await page.goto(scanUrl("ab12cd"));
+  await expect(page.locator("#signed-out-message")).toContainText("Sign in with Google to register device ab12cd");
+  await expect(page.locator("#sign-in")).toBeVisible();
+  expect(new URL(page.url()).hash).toBe("");
+  await page.locator("#sign-in").click();
+  await expect(page.locator("#device-onboarding")).toBeVisible();
+  await expect(page.locator("#device-onboarding-id")).toHaveValue("ab12cd");
+  expect(new URL(page.url()).search).toBe("");
+  expect(await page.evaluate(() => window.__claims || [])).toEqual([]);
+  await page.locator("#device-claim").click();
+  await expect(page.locator("#device-onboarding-status")).toContainText("Waiting for the device");
+});
+
+test("an authorized scanned device opens its own controls without creating a claim", async ({page}) => {
+  await page.goto(scanUrl("second-device"));
+  await expect(page.locator("#controls")).toBeVisible();
+  await expect(page.locator("#device")).toHaveValue("second-device");
+  await expect(page.locator("#device-onboarding")).toBeHidden();
+  expect(await page.evaluate(() => window.__claims || [])).toEqual([]);
+});
+
+test("manual Add explains fresh QR scanning and never registers from an ID alone", async ({page}) => {
   await page.goto("/");
   await page.locator("#account-menu-button").click();
   await page.locator("#add-device").click();
-  await expect(page.locator("#device-onboarding")).toBeVisible();
-  await page.locator("#device-onboarding-id").fill("bad id");
+  await expect(page.locator("#device-onboarding-status")).toContainText("Scan a fresh QR code");
+  await expect(page.locator("#device-claim")).toBeHidden();
+  await page.locator("#device-onboarding-cancel").click();
+  await expect(page.locator("#controls")).toBeVisible();
+  expect(await page.evaluate(() => window.__claims || [])).toEqual([]);
+});
+
+for (const suffix of ["?device_id=ab12cd#pair=bad", "?device_id=ab12cd"]) {
+  test(`invalid QR cannot register: ${suffix}`, async ({page}) => {
+    await page.goto("/" + suffix);
+    await expect(page.locator("#device-onboarding")).toBeVisible();
+    await expect(page.locator("#device-onboarding-status")).toContainText("Scan a fresh QR code");
+    await expect(page.locator("#device-claim")).toBeHidden();
+    expect(new URL(page.url()).hash).toBe("");
+    expect(await page.evaluate(() => window.__claims || [])).toEqual([]);
+  });
+}
+
+test("expired saved scans are discarded after OAuth", async ({page}) => {
+  await page.addInitScript(code => sessionStorage.setItem("drawbridge.pairing", JSON.stringify({deviceId: "ab12cd", pairingCode: code, createdAtMs: Date.now() - 7200001})), pairingCode);
+  await page.goto("/");
+  await expect(page.locator("#controls")).toBeVisible();
+  expect(await page.evaluate(() => sessionStorage.getItem("drawbridge.pairing"))).toBeNull();
+});
+
+test("expired claims stop polling and can be retried explicitly", async ({page}) => {
+  await page.addInitScript(() => { window.__scenario = "claim-expired"; });
+  await page.goto(scanUrl("ab12cd"));
   await page.locator("#device-claim").click();
-  await expect(page.locator("#device-onboarding-status")).toHaveText(/lowercase letters/i);
-  await page.locator("#device-onboarding-id").fill("ab12cd");
-  await page.locator("#device-claim").click();
-  await expect(page.locator("#device-onboarding-status")).toHaveText(/expired/i);
+  await expect(page.locator("#device-onboarding-status")).toContainText("expired");
   await expect(page.locator("#device-claim")).toBeEnabled();
   expect(await page.evaluate(() => window.__claimPolls)).toBe(1);
 });
 
-test("QR registration links prefill the device ID", async ({page}) => {
-  await page.addInitScript(() => { window.__scenario = "claim-expired"; });
-  await page.goto("/?device_id=AB12CD");
+test("registration rejects an already owned device without takeover", async ({page}) => {
+  await page.addInitScript(() => { window.__scenario = "claim-owned"; });
+  await page.goto(scanUrl("ab12cd"));
+  await page.locator("#device-claim").click();
+  await expect(page.locator("#device-onboarding-status")).toContainText("already registered");
+  await expect(page.locator("#device-claim")).toBeEnabled();
+  expect(await page.evaluate(() => window.__commands || [])).toEqual([]);
+});
+
+test("offline registration stays disabled and cancel ignores an in-flight response", async ({page, context}) => {
+  await page.addInitScript(() => { window.__scenario = "claim-delayed"; });
+  await page.goto(scanUrl("ab12cd"));
+  await context.setOffline(true);
+  await expect(page.locator("#device-claim")).toBeDisabled();
+  await context.setOffline(false);
+  await expect(page.locator("#device-claim")).toBeEnabled();
+  expect(await page.evaluate(() => window.__claims || [])).toEqual([]);
+  await page.locator("#device-claim").click();
+  await page.locator("#device-onboarding-cancel").click();
+  await page.evaluate(() => window.__releaseClaim());
+  await expect(page.locator("#controls")).toBeVisible();
+  await expect(page.locator("#device-onboarding")).toBeHidden();
+  expect(await page.evaluate(() => window.__claimPolls || 0)).toBe(0);
+});
+
+test("compact QR links open registration for existing accounts", async ({page}) => {
+  await page.goto(`/?d=ab12cd#p=${pairingCode}`);
+  await expect(page.locator("#device-onboarding")).toBeVisible();
   await expect(page.locator("#device-onboarding-id")).toHaveValue("ab12cd");
+  expect(new URL(page.url()).hash).toBe("");
+  expect(await page.evaluate(() => window.__claims || [])).toEqual([]);
 });
