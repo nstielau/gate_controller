@@ -88,3 +88,15 @@ button:disabled { opacity: .45; cursor: default; }
 #admin-devices article:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
 #admin-devices article:first-child h3 { margin-top: 0; }
 #admin-result:empty { display: none; }
+#admin-stats-status:empty { display: none; }
+#admin-stats-devices details { border-top: 1px solid #dce2d5; }
+#admin-stats-devices summary { cursor: pointer; padding: .85rem 0; overflow-wrap: anywhere; }
+#admin-stats-devices summary span { font-weight: 650; }
+#admin-stats-devices summary small { display: block; margin: .3rem 0 0 1rem; color: #52665b; }
+.stats-breakdown { padding: 0 0 .75rem 1rem; }
+.stats-breakdown > p { font-size: .8rem; }
+.stats-breakdown ul { list-style: none; padding: 0; margin: 0; }
+.stats-breakdown li { display: flex; align-items: baseline; gap: .75rem; padding: .6rem 0; border-top: 1px solid #edf2e6; font-size: .85rem; }
+.stats-breakdown li > div { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.stats-breakdown li small { display: block; margin-top: .2rem; color: #52665b; }
+.stats-count { flex: 0 0 auto; font-variant-numeric: tabular-nums; }

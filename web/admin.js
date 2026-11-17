@@ -3,6 +3,8 @@ export function createAdminView({gateway, onClose}) {
   const root = document.querySelector("#admin-view"), output = document.querySelector("#admin-result");
   let epoch = 0, refreshEpoch = 0, working = false;
   let refreshTimer, pendingSetup = false;
+  let statsEpoch = 0;
+  const expandedStats = new Set();
   const setupStates = new Set(["pending", "awaiting_setup", "provisioning"]);
   function stopPolling() { clearTimeout(refreshTimer); refreshTimer = undefined; }
   function schedulePolling() {
@@ -58,6 +60,56 @@ export function createAdminView({gateway, onClose}) {
     card.append(restart);
   }
   const element = (tag, text) => { const node = document.createElement(tag); node.textContent = text; return node; };
+  const statsDevices = document.querySelector("#admin-stats-devices"), statsStatus = document.querySelector("#admin-stats-status");
+  const count = value => Number.isSafeInteger(value) && value >= 0 ? value.toLocaleString() : "0";
+  const holds = value => `${count(value)} ${value === 1 ? "hold" : "holds"}`;
+  function clearStats(message = "") {
+    ++statsEpoch;
+    statsDevices.replaceChildren(); statsStatus.textContent = message;
+  }
+  async function refreshStats() {
+    clearStats("Loading statistics…");
+    const current = epoch, request = statsEpoch;
+    const valid = () => current === epoch && request === statsEpoch && !root.hidden && navigator.onLine;
+    const failed = () => { if (valid()) clearStats("Couldn't load statistics. Refresh administration to try again."); };
+    try {
+      const data = await gateway().adminStats({});
+      if (!valid()) return;
+      statsStatus.textContent = data.truncated ? "Showing the first 200 devices." : data.devices.length ? "Expand a device to see holds by person." : "No devices to show.";
+      statsDevices.replaceChildren(...data.devices.map(device => {
+        const details = document.createElement("details"), summary = document.createElement("summary");
+        const name = element("span", device.name), total = element("small", `${holds(device.holdCount)} issued`);
+        summary.append(name, total); details.append(summary);
+        const body = element("div", ""), people = element("ul", ""), status = element("p", "");
+        body.className = "stats-breakdown"; status.className = "hint";
+        body.append(element("p", `Device: ${device.id}`), status, people); details.append(body);
+        let loaded = false;
+        async function loadPeople() {
+          if (loaded || !valid()) return;
+          loaded = true; status.textContent = "Loading people…";
+          try {
+            const data = await gateway().adminStats({deviceId: device.id});
+            if (!valid() || !details.isConnected) return;
+            status.textContent = data.truncated ? "Showing the top 200 people." : data.people.length ? "Holds by person" : "No holds recorded for people yet.";
+            people.replaceChildren(...data.people.map(person => {
+              const row = element("li", ""), identity = element("div", ""), number = element("span", holds(person.holdCount));
+              const primary = person.name || person.email || `Unavailable account · ${person.id.slice(0, 8)}`;
+              identity.append(element("span", primary));
+              if (person.name && person.email) identity.append(element("small", person.email));
+              number.className = "stats-count"; row.append(identity, number); return row;
+            }));
+          } catch { failed(); }
+        }
+        details.addEventListener("toggle", () => {
+          if (!valid()) return;
+          if (details.open) { expandedStats.add(device.id); loadPeople(); }
+          else expandedStats.delete(device.id);
+        });
+        details.open = expandedStats.has(device.id);
+        return details;
+      }));
+    } catch { failed(); }
+  }
   const tabs = [...root.querySelectorAll('[role="tab"]')];
   function selectTab(selected) {
     tabs.forEach(tab => {
@@ -66,6 +118,7 @@ export function createAdminView({gateway, onClose}) {
       tab.tabIndex = active ? 0 : -1;
       document.getElementById(tab.getAttribute("aria-controls")).hidden = !active;
     });
+    if (selected.id === "admin-tab-stats" && !root.hidden && navigator.onLine) refreshStats();
   }
   tabs.forEach((tab, index) => {
     tab.onclick = () => selectTab(tab);
@@ -138,6 +191,7 @@ export function createAdminView({gateway, onClose}) {
       card.append(assign, pause); return card;
     }));
     lock(working);
+    if (document.querySelector("#admin-tab-stats").getAttribute("aria-selected") === "true") await refreshStats();
   }
   document.querySelector("#admin-grant").onsubmit = event => {
     event.preventDefault();
@@ -151,15 +205,17 @@ export function createAdminView({gateway, onClose}) {
     document.querySelector("#admin-people").replaceChildren();
     document.querySelector("#admin-devices").replaceChildren();
     document.querySelector("#admin-email").value = "";
+    clearStats(); expandedStats.clear();
   }
   async function open() {
     stopPolling();
+    clearStats();
     const current = ++epoch; root.hidden = false; lock(true); output.textContent = "Loading administration…";
     try { await refresh(); if (current === epoch) output.textContent = ""; }
     catch { if (current === epoch) { close(); onClose(); document.querySelector("#result").textContent = "Administrator access unavailable. Refresh access."; } }
     finally { if (current === epoch) { lock(false); schedulePolling(); } }
   }
-  window.addEventListener("offline", () => { stopPolling(); ++refreshEpoch; lock(working); });
+  window.addEventListener("offline", () => { stopPolling(); ++refreshEpoch; clearStats("Reconnect and refresh administration to load statistics."); lock(working); });
   window.addEventListener("online", () => { lock(working); schedulePolling(); });
   return {open, close};
 }

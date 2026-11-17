@@ -25,6 +25,7 @@ export async function createGateway() {
   return {
     adminSession: async () => (await httpsCallable(functions, "adminSession")({})).data,
     adminOverview: async () => (await httpsCallable(functions, "adminOverview")({})).data,
+    adminStats: async data => (await httpsCallable(functions, "adminStats", {timeout: 30000})(data)).data,
     adminChange: async data => (await httpsCallable(functions, "adminChange")(data)).data,
     inviteDeviceUser: async data => (await httpsCallable(functions, "inviteDeviceUser", {timeout: 30000})(data)).data,
     onUser: callback => onAuthStateChanged(auth, callback),

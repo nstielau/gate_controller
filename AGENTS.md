@@ -97,8 +97,13 @@
   person and person/gate totals. All increments share the pending-to-accepted
   command transaction; derive identity/duration from its reserved audit record.
   Never count End hold, unknown/pending/rejected commands or replayed finishes.
-  Person counters begin at deployment with no historical backfill. Keep them
-  server-only and covered by deny-all client rules.
+  Person counters begin at deployment with no historical backfill. Direct client
+  reads stay denied. Only current admins may read allowlisted counts/identities
+  through `adminStats` with verified Google auth/App Check. Recheck the role
+  after Firebase Auth identity lookup; never return raw UIDs/profiles/secrets.
+  Administration Stats loads a person's breakdown only when its gate expands;
+  preserve late-response guards, clearing on close/offline/error and visible
+  truncation notices. Stats reads must never write counters or publish MQTT.
 
 # QR device registration
 

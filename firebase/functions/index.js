@@ -54,11 +54,14 @@ exports.deviceRegister = onRequest({...options, enforceAppCheck: undefined, secr
 
 const {getStorage} = require("firebase-admin/storage");
 const {createAdministration, createDeviceService} = require("./administration.cjs");
+const {createStatistics} = require("./statistics.cjs");
 const administration = createAdministration(getFirestore());
 const deviceService = createDeviceService(getFirestore());
 exports.adminSession = onCall(options, callable(administration.session));
 exports.adminOverview = onCall(options, callable(administration.overview));
 exports.adminChange = onCall(options, callable(administration.change));
+const statistics = createStatistics({db: getFirestore(), auth: getAuth()});
+exports.adminStats = onCall(options, callable(statistics.read));
 const deviceAccess = createDeviceAccess({db: getFirestore(), auth: getAuth()});
 exports.inviteDeviceUser = onCall(options, callable(deviceAccess.invite));
 const {createFirmwareHandler} = require("./firmware-http.cjs");

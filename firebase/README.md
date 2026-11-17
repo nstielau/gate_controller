@@ -45,7 +45,7 @@ Only assigned users can control a gate. The browser receives gate IDs and
 display names, never MQTT credentials or arbitrary broker/topic parameters.
 The first assigned account is `nick.stielau@gmail.com`, for gate `b3640c`.
 
-Administration has **Admins** and **Device Firmware** tabs and a refresh icon.
+Administration has **Admins**, **Device Firmware**, and **Stats** tabs and a refresh icon.
 Every device card shows **Last seen** as the local date/time of the latest
 authenticated device contact, plus the most recently reported **App** and
 **Base** versions. This includes non-OTA boards. Use **Refresh administration**
@@ -106,8 +106,21 @@ same transaction as the pending command becoming accepted. Replays, transaction
 retries, rejected/pending commands, uncertain deliveries and End hold cannot
 increment them. Identity and nonzero duration come from the reserved command.
 They measure broker-accepted holds, not confirmed physical openings. Person
-statistics are IAM-only for now: no new browser/API fields, and deny-all client
-rules cover both usage paths.
+statistics are available only to current application administrators through
+`adminStats`, behind verified Google authentication and App Check. The Stats tab
+shows each gate's total holds; expand a gate for its person breakdown, highest
+count first, identified by current Firebase Auth name/email. Removed accounts
+remain as unavailable-account rows so their counts are retained. The shared
+refresh button updates totals and any expanded breakdowns. The page explains
+that person tracking began November 16, 2026, so older gate totals may exceed
+the person breakdown.
+
+The Stats API loads people only for an expanded device and returns explicitly
+allowlisted fields. It rechecks current admin access after resolving identities,
+never returns raw UIDs or Auth profiles, and does not write data or publish MQTT.
+It returns up to 200 devices or the top 200 people, with a visible limit notice.
+Non-admin gate users cannot access these statistics. Deny-all client rules still
+cover both usage paths; the ordinary device list remains unchanged.
 
 Firestore transactions reserve commands before publishing, enforce a
 three-second per-device cooldown, and prevent a repeated request ID from

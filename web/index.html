@@ -110,6 +110,7 @@
     <div class="admin-tabs" role="tablist" aria-label="Administration sections">
       <button id="admin-tab-people" type="button" role="tab" aria-selected="true" aria-controls="admin-panel-people">Admins</button>
       <button id="admin-tab-firmware" type="button" role="tab" aria-selected="false" aria-controls="admin-panel-firmware" tabindex="-1">Device Firmware</button>
+      <button id="admin-tab-stats" type="button" role="tab" aria-selected="false" aria-controls="admin-panel-stats" tabindex="-1">Stats</button>
     </div>
     <div id="admin-panel-people" role="tabpanel" aria-labelledby="admin-tab-people">
       <ul id="admin-people"></ul>
@@ -122,6 +123,11 @@
     </div>
     <div id="admin-panel-firmware" role="tabpanel" aria-labelledby="admin-tab-firmware" hidden>
       <div id="admin-devices"></div>
+    </div>
+    <div id="admin-panel-stats" role="tabpanel" aria-labelledby="admin-tab-stats" hidden>
+      <p class="hint">Counts are broker-accepted hold commands. Person tracking began November 16, 2026; older gate totals can exceed the person breakdown.</p>
+      <p id="admin-stats-status" class="hint" role="status"></p>
+      <div id="admin-stats-devices"></div>
     </div>
     <p id="admin-result" role="status"></p>
   </section>

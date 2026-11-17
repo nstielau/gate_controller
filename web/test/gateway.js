@@ -47,6 +47,16 @@ export async function createGateway() {
         baseVersion: window.__firmwareReport.base_version || null, reportedAtMs: window.__firmwareReport.atMs,
       } : null}], releases: [{version: "1.0.0"}]};
     },
+    async adminStats(data) {
+      window.__statsReads ||= []; window.__statsReads.push(data);
+      const fail = window.__failStats;
+      const result = structuredClone(data.deviceId
+        ? {deviceId: data.deviceId, people: data.deviceId === "test-device" ? window.__statsPeople || [] : [], truncated: window.__statsPeopleTruncated || false}
+        : {devices: window.__statsDevices || [], truncated: window.__statsDevicesTruncated || false});
+      if (window.__delayStats) await new Promise(resolve => { window.__releaseStats = resolve; });
+      if (fail) throw new Error("Statistics unavailable");
+      return result;
+    },
     async adminChange(data) {
       window.__adminChanges ||= []; window.__adminChanges.push(data);
       if (window.__delayAdminChange) await new Promise(resolve => { window.__releaseAdminChange = resolve; });
