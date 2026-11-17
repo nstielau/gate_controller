@@ -229,6 +229,7 @@ test("maintenance authenticates private proof and supported versions and exposes
   const f = await registeredFixture();
   const maintenance = {...f.device, action: "maintenance", app_version: "1.0.4", base_version: "1.0.13"};
   assert.deepEqual(await f.api.register(maintenance), {deviceId: f.id, restartSetup: null});
+  assert.equal(f.db.get("devices/" + f.id).lastSeenAtMs, start);
   assert.deepEqual(f.db.get("devices/" + f.id).maintenance, {appVersion: "1.0.4", baseVersion: "1.0.13", lastSeenAtMs: start, supportsRestartSetup: true});
   for (const changes of [{base_version: "1.0.12"}, {base_version: "01.0.13"}, {app_version: "bad"}, {device_secret: f.code}]) {
     await assert.rejects(f.api.register({...maintenance, ...changes}));
@@ -297,4 +298,19 @@ test("HTTP forwards maintenance versions and reset generation without exposing e
   await handler({method: "POST", body: {...f.device, action: "restart_setup_complete", setup_reset_id: id}}, response);
   assert.equal(response.code, 200);
   assert.deepEqual(response.body, {deviceId: f.id, state: "awaiting_setup", setup_reset_id: id});
+});
+
+test("an older retried maintenance request cannot replace a newer firmware snapshot", async () => {
+  const f = await registeredFixture(), runTransaction = f.db.runTransaction.bind(f.db);
+  const request = {...f.device, action: "maintenance", app_version: "1.0.1", base_version: "1.0.13"};
+  f.db.runTransaction = async fn => {
+    f.db.runTransaction = runTransaction;
+    f.advance(100);
+    await f.api.register({...request, app_version: "1.0.2", base_version: "1.0.14"});
+    return runTransaction(fn);
+  };
+  await f.api.register(request);
+  const stored = f.db.get("devices/" + f.id);
+  assert.equal(stored.lastSeenAtMs, start + 100);
+  assert.deepEqual(stored.maintenance, {appVersion: "1.0.2", baseVersion: "1.0.14", lastSeenAtMs: start + 100, supportsRestartSetup: true});
 });

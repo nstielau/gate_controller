@@ -28,6 +28,18 @@ export function createAdminView({gateway, onClose}) {
     if (state === "complete") return "Setup complete. The device confirmed registration.";
     return "";
   }
+  function appendObservation(card, device) {
+    const observed = device.observation;
+    const seen = element("p", "Last seen: ");
+    const stamp = observed?.lastSeenAtMs;
+    if (Number.isSafeInteger(stamp) && stamp > 0 && stamp <= 8640000000000000) {
+      const time = element("time", new Date(stamp).toLocaleString());
+      time.dateTime = new Date(stamp).toISOString();
+      seen.append(time);
+    } else seen.append(document.createTextNode("Not reported"));
+    seen.title = "Last authenticated device contact; refresh administration to update.";
+    card.append(seen, element("p", `App ${observed?.appVersion || "not reported"} · Base ${observed?.baseVersion || "not reported"}`));
+  }
   function appendSetup(card, device) {
     const status = setupStatus(device);
     if (status) { const message = element("p", status); message.className = "setup-status"; message.setAttribute("role", "status"); card.append(message); }
@@ -104,9 +116,10 @@ export function createAdminView({gateway, onClose}) {
     document.querySelector("#admin-devices").replaceChildren(...data.devices.map(device => {
       const card = element("article", "");
       card.append(element("h3", device.name), element("p", `Device: ${device.id}`));
+      appendObservation(card, device);
       appendSetup(card, device);
       const report = device.reported;
-      card.append(element("p", report ? `App ${report.version} · Base ${report.base_version || "not reported"} · ${report.state} · ${new Date(report.atMs).toLocaleString()}` : "No firmware report yet."));
+      if (report) card.append(element("p", `Update status: ${report.state}`));
       card.append(element("p", device.target?.enabled ? `Target: ${device.target.version} (deployment ${device.target.sequence})` : "Automatic updates paused."));
       if (!device.enabled || !device.otaEnrolled) {
         card.append(element("p", !device.enabled ? "Device is disabled." : "OTA updates are not enabled for this device."));

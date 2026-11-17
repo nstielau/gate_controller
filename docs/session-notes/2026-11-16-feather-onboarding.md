@@ -126,3 +126,23 @@ Validation passed 113 host tests, all pre-commit checks, 46 web/backend unit
 tests, 83 browser tests (one existing skip) and 27 local Firestore tests. The
 production restart-setup/owner registration cycle still needs an interactive
 user test. No production reset, new gate hold or ownership change was issued.
+
+## Admin observation and simplified website QR
+
+Administration now shows stored last-authenticated-contact time and the newest
+reported app/base pair for all devices, including non-OTA boards. Missing data
+stays unreported; targets and older reports never fill in a missing base. Common
+lastSeenAtMs is persisted on authenticated maintenance/OTA requests with legacy
+report fallback. Delayed transaction retries cannot replace a newer version
+snapshot. Only existing admin overview exposes the allowlisted metadata; use
+Refresh administration to update it. This is not live MQTT/gate confirmation.
+
+USB base 1.0.14 keeps the dark Drawbridge/device-ID header on the ordinary website
+QR shortcut, centers the QR below, and hides hold/D2 text in that view. Normal
+status and button behavior are unchanged. Native layout/cache/input checks and
+70-second passive observation passed on 37cc02 (app 1.0.1, CP 10.3.2), with no
+active hold, reset-setup request or credential changes. Validation: 113 host,
+50 unit, 87 browser (one existing WebKit skip) and 28 actual local emulator tests,
+plus hooks. Cloud metadata confirms this actual app/base pair and stored contact
+time. Production Wi-Fi-reset/registration and electrical validation remain
+separate interactive checks.

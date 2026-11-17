@@ -41,7 +41,7 @@ function restartFixture() {
   const db = {doc: path => ({path}), collection: collection => ({limit: () => ({collection})}), async runTransaction(fn) { return fn(tx); }};
   const auth = {uid, token: {email, email_verified: true, firebase: {sign_in_provider: "google.com"}}};
   const request = {auth, data: {action: "restartSetup", deviceId: id, requestId: "12345678-1234-4234-8234-123456789012", issuedAtMs: time}};
-  return {records, device, request, api: createAdministration(db, () => time), time, id, uid, email, hash};
+  return {db, records, device, request, api: createAdministration(db, () => time), time, id, uid, email, hash};
 }
 test("restart setup disables controls transactionally, preserves identity, and deduplicates its stable audit ID", async () => {
   const f = restartFixture(), before = structuredClone(f.device);
@@ -92,4 +92,54 @@ test("admin overview exposes allowlisted maintenance and reset progress without 
   assert.equal(JSON.stringify(view).includes("private"), false);
   assert.equal(JSON.stringify(view).includes(f.uid), false);
   assert.equal(JSON.stringify(view).includes(f.records.get("devices/" + f.id).setupReset.id), false);
+});
+
+
+test("admin observation selects the newest stored firmware pair without inferring target or missing base", async () => {
+  const f = restartFixture(), device = f.records.get("devices/" + f.id);
+  device.lastSeenAtMs = f.time + 30;
+  device.reportedFirmware = {version: "2.0.0", base_version: "1.0.2", atMs: f.time - 10, state: "current", privateToken: "must-not-escape"};
+  let view = (await f.api.overview(f.request)).devices[0];
+  assert.deepEqual(view.observation, {lastSeenAtMs: f.time + 30, appVersion: "1.0.4", baseVersion: "1.0.13", reportedAtMs: f.time});
+  device.reportedFirmware.atMs = f.time + 20;
+  delete device.reportedFirmware.base_version;
+  view = (await f.api.overview(f.request)).devices[0];
+  assert.deepEqual(view.observation, {lastSeenAtMs: f.time + 30, appVersion: "2.0.0", baseVersion: null, reportedAtMs: f.time + 20});
+  assert.equal(JSON.stringify(view).includes("must-not-escape"), false);
+  delete device.lastSeenAtMs;
+  delete device.maintenance;
+  view = (await f.api.overview(f.request)).devices[0];
+  assert.equal(view.observation.lastSeenAtMs, f.time + 20);
+  device.reportedFirmware = null;
+  view = (await f.api.overview(f.request)).devices[0];
+  assert.deepEqual(view.observation, {lastSeenAtMs: null, appVersion: null, baseVersion: null, reportedAtMs: null});
+});
+test("admin observation ignores invalid timestamps and versions, never returning invalid dates or nested data", async () => {
+  for (const stamp of [-1, 0, "123", null, 1.5, 8640000000000001]) {
+    const f = restartFixture(), device = f.records.get("devices/" + f.id);
+    device.lastSeenAtMs = stamp;
+    device.maintenance = {appVersion: "bad", baseVersion: {private: true}, lastSeenAtMs: stamp};
+    device.reportedFirmware = {version: "01.2.3", base_version: true, atMs: stamp};
+    const view = (await f.api.overview(f.request)).devices[0];
+    assert.deepEqual(view.observation, {lastSeenAtMs: null, appVersion: null, baseVersion: null, reportedAtMs: null});
+  }
+});
+
+
+test("an older retried OTA report cannot replace a newer firmware snapshot", async () => {
+  const f = restartFixture(), {createDeviceService} = require("../administration.cjs");
+  let time = f.time;
+  const service = createDeviceService(f.db, () => time), runTransaction = f.db.runTransaction.bind(f.db);
+  f.db.runTransaction = async fn => {
+    f.db.runTransaction = runTransaction;
+    time += 100;
+    await service.report(f.id, {version: "1.0.2", base_version: "1.0.14", state: "current", sequence: 2});
+    return runTransaction(fn);
+  };
+  await service.report(f.id, {version: "1.0.1", base_version: "1.0.13", state: "current", sequence: 1});
+  const stored = f.records.get("devices/" + f.id);
+  assert.equal(stored.lastSeenAtMs, f.time + 100);
+  assert.equal(stored.reportedFirmware.version, "1.0.2");
+  assert.equal(stored.reportedFirmware.base_version, "1.0.14");
+  assert.equal(stored.reportedFirmware.atMs, f.time + 100);
 });

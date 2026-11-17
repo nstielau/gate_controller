@@ -1,3 +1,4 @@
+const {lastSeen} = require("./device-observation.cjs");
 const {randomBytes: cryptoRandomBytes, createHash, createCipheriv, createDecipheriv} = require("node:crypto");
 const {userId, fail} = require("./controller.cjs");
 
@@ -174,7 +175,12 @@ function createEnrollment({db, broker, now = Date.now, randomBytes = cryptoRando
         if (!record || !deviceDoc.exists || !exactDeviceTopics(device, id) || !["registered", "awaiting_setup", "ready"].includes(record.state)) fail("failed-precondition", "Device registration is unavailable.");
         decrypt(record.envelope, secret, context);
         if (action === "maintenance") {
-          tx.update(deviceRef(id), {maintenance: {appVersion: request.app_version, baseVersion: request.base_version, lastSeenAtMs: time, supportsRestartSetup: true}});
+          const update = {lastSeenAtMs: lastSeen(device.lastSeenAtMs, device.maintenance?.lastSeenAtMs, time)};
+          // A retry may read a report committed by a newer request.
+          if ((lastSeen(device.maintenance?.lastSeenAtMs) || 0) <= time) {
+            update.maintenance = {appVersion: request.app_version, baseVersion: request.base_version, lastSeenAtMs: time, supportsRestartSetup: true};
+          }
+          tx.update(deviceRef(id), update);
           return {response: {deviceId: id, restartSetup: reset ? {id: reset.id, state: reset.state} : null}};
         }
         if (!reset || reset.id !== request.setup_reset_id || !["pending", "awaiting_setup"].includes(reset.state)) fail("failed-precondition", "Device registration is unavailable.");

@@ -46,9 +46,20 @@ display names, never MQTT credentials or arbitrary broker/topic parameters.
 The first assigned account is `nick.stielau@gmail.com`, for gate `b3640c`.
 
 Administration has **Admins** and **Device Firmware** tabs and a refresh icon.
-Firmware cards show the last reported app/base pair, separately from the assigned
-target. Older boards show “Base not reported” until their USB bootstrap supports
-independent reporting. See [OTA operations](../docs/ota-operations.md).
+Every device card shows **Last seen** as the local date/time of the latest
+authenticated device contact, plus the most recently reported **App** and
+**Base** versions. This includes non-OTA boards. Use **Refresh administration**
+to fetch updated values. Missing values say “not reported”; a missing base is
+never inferred from an assigned target or another report. App/base are kept
+as a pair from one report. Targets and OTA update status remain separate.
+
+Last seen is stored using server receipt time for authenticated maintenance
+and OTA API requests. Existing maintenance/firmware report timestamps provide
+legacy fallback without a migration. Maintenance currently runs only while
+the device is idle, so last seen may age during an active hold. It does not
+assert current Wi-Fi/MQTT connectivity or physical gate state. Only admins can
+read this metadata through the existing authenticated/App Check overview; the
+browser receives no device credentials. See [OTA operations](../docs/ota-operations.md).
 
 
 Compatible registered boards also offer **Restart setup** in Administration.

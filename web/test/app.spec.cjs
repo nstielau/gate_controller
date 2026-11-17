@@ -376,6 +376,34 @@ test("firmware shows independently reported base and app versions, including leg
   await expect(page.locator("#admin-devices")).toContainText("App 1.0.9 · Base not reported");
 });
 
+test("admin shows stored last-seen and versions for a non-OTA device and updates on refresh", async ({page}, testInfo) => {
+  const atMs = Date.UTC(2026, 10, 16, 20, 0);
+  await openSetupAdmin(page, {observation: {lastSeenAtMs: atMs, appVersion: "1.0.1", baseVersion: "1.0.13", reportedAtMs: atMs}});
+  const devices = page.locator("#admin-devices");
+  await expect(devices).toContainText("App 1.0.1 · Base 1.0.13");
+  await expect(devices.getByText("Last seen:", {exact: false})).toBeVisible();
+  await expect(devices.locator("time")).toHaveAttribute("datetime", new Date(atMs).toISOString());
+  await page.evaluate(value => {
+    window.__setupDevice.observation = {lastSeenAtMs: value, appVersion: "1.0.2", baseVersion: null, reportedAtMs: value};
+  }, atMs + 60000);
+  await page.getByRole("button", {name: "Refresh administration"}).click();
+  await expect(devices).toContainText("App 1.0.2 · Base not reported");
+  await expect(devices.locator("time")).toHaveAttribute("datetime", new Date(atMs + 60000).toISOString());
+  expect(await page.evaluate(() => window.__adminChanges || [])).toEqual([]);
+  expect(await page.evaluate(() => window.__commands || [])).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({path: `artifacts/admin-observation-${testInfo.project.name}.png`, fullPage: true});
+});
+
+test("admin shows explicit missing observation without inferring installed target versions", async ({page}) => {
+  await openSetupAdmin(page, {maintenance: null, target: {version: "9.0.0", enabled: true}});
+  const devices = page.locator("#admin-devices");
+  await expect(devices).toContainText("Last seen: Not reported");
+  await expect(devices).toContainText("App not reported · Base not reported");
+  await expect(devices.locator("time")).toHaveCount(0);
+  await expect(devices).not.toContainText("App 9.0.0");
+});
+
 const pairingCode = "a".repeat(64);
 const scanUrl = id => `/?device_id=${id}#pair=${pairingCode}`;
 

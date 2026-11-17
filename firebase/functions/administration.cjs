@@ -1,6 +1,7 @@
 const {createHash, timingSafeEqual} = require("node:crypto");
 const {userId, fail} = require("./controller.cjs");
 const {supportsRestartSetupVersion} = require("./enrollment.cjs");
+const {observation, publicReport, lastSeen} = require("./device-observation.cjs");
 const OWNER = "nick.stielau@gmail.com";
 const hash = value => createHash("sha256").update(value).digest("hex");
 const DEVICE = /^[a-z0-9-]{1,64}$/;
@@ -65,7 +66,7 @@ function createAdministration(db, now = Date.now) {
           admins: admins.docs.map(d => ({email: d.data().email, owner: d.data().email === OWNER})),
           devices: devices.docs.map(d => ({id: d.id, name: d.data().name || d.id,
             enabled: d.data().enabled === true, otaEnrolled: !!d.data().otaCredentialHash,
-            target: d.data().firmwareTarget || null, reported: d.data().reportedFirmware || null,
+            target: d.data().firmwareTarget || null, reported: publicReport(d.data().reportedFirmware), observation: observation(d.data()),
             maintenance: publicMaintenance(d.data().maintenance), setupReset: publicSetupReset(d.data().setupReset)})),
           releases: releases.docs.filter(d => d.data().approved === true).map(d => ({version: d.id, sha256: d.data().sha256}))
         };
@@ -138,7 +139,7 @@ function createDeviceService(db, now = Date.now) {
         if (!device?.enabled || !/^[a-f0-9]{64}$/.test(expected || "") || !timingSafeEqual(Buffer.from(hash(token), "hex"), Buffer.from(expected, "hex"))) fail("unauthenticated", "Device authentication required.");
         const stamp = `otaLast${operation}AtMs`, time = now();
         if (time - (device[stamp] || 0) < 10000) fail("resource-exhausted", "Try later.");
-        tx.update(ref, {[stamp]: time});
+        tx.update(ref, {[stamp]: time, lastSeenAtMs: lastSeen(device.lastSeenAtMs, time)});
         return device;
       });
     },
@@ -154,10 +155,18 @@ function createDeviceService(db, now = Date.now) {
           !VERSION.test(value.version || "") || !Number.isSafeInteger(value.sequence) || value.sequence < 0 ||
           (value.reason !== undefined && !/^[a-z_]{1,40}$/.test(value.reason)) ||
           (value.base_version !== undefined && (typeof value.base_version !== "string" || !VERSION.test(value.base_version)))) fail("invalid-argument", "Invalid firmware report.");
-      await db.doc("devices/" + deviceId).update({reportedFirmware: {
-        state: value.state, version: value.version, base_version: value.base_version || null, sequence: value.sequence,
-        reason: value.reason || null, atMs: now()
-      }});
+      const ref = db.doc("devices/" + deviceId), time = now();
+      await db.runTransaction(async tx => {
+        const device = (await tx.get(ref)).data();
+        const update = {lastSeenAtMs: lastSeen(device?.lastSeenAtMs, device?.reportedFirmware?.atMs, time)};
+        if ((lastSeen(device?.reportedFirmware?.atMs) || 0) <= time) {
+          update.reportedFirmware = {
+            state: value.state, version: value.version, base_version: value.base_version || null, sequence: value.sequence,
+            reason: value.reason || null, atMs: time
+          };
+        }
+        tx.update(ref, update);
+      });
     }
   };
 }

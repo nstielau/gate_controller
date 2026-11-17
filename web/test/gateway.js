@@ -42,7 +42,10 @@ export async function createGateway() {
       if (window.__delayAdminOverview) await new Promise(resolve => { window.__releaseAdminOverview = resolve; });
       if (failOverview) throw new Error("Overview unavailable");
       window.__admins ||= [{email: "nick.stielau@gmail.com", owner: true}];
-      return {admins: window.__admins, devices: [setupDevice || {id: "test-device", name: "Garden gate", enabled: true, otaEnrolled: true, target: window.__target || null, reported: window.__firmwareReport || null}], releases: [{version: "1.0.0"}]};
+      return {admins: window.__admins, devices: [setupDevice || {id: "test-device", name: "Garden gate", enabled: true, otaEnrolled: true, target: window.__target || null, reported: window.__firmwareReport || null, observation: window.__firmwareReport ? {
+        lastSeenAtMs: window.__firmwareReport.atMs, appVersion: window.__firmwareReport.version,
+        baseVersion: window.__firmwareReport.base_version || null, reportedAtMs: window.__firmwareReport.atMs,
+      } : null}], releases: [{version: "1.0.0"}]};
     },
     async adminChange(data) {
       window.__adminChanges ||= []; window.__adminChanges.push(data);

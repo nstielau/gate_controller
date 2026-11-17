@@ -159,7 +159,9 @@
   it. Keep GATE1/GATE2/GATE3 migration support and never prefill saved passwords.
 - Reverse TFT normal operation: D0 (active LOW) or D1 (active HIGH) toggles
   the ordinary website QR, returning after 20 seconds. Never include pairing
-  parameters in that shortcut. D2 (active HIGH) selects the one-shot next-reboot
+  parameters in that shortcut. Keep the dark header and center its QR below;
+  omit hold/reboot controls from the QR view while preserving the normal status
+  screen. D2 (active HIGH) selects the one-shot next-reboot
   Normal/Wi-Fi setup action shown on the bottom TFT row. Persist before showing
   success, consume the flag before setup, and debounce all inputs. Onboarding
   consumes button state without triggering normal shortcuts. Buttons never

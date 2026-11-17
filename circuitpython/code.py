@@ -985,9 +985,7 @@ def service_outputs(runtime, online):
     )
     if display is not None and not display_onboarding and status != display_last_status:
         if status[5]:
-            display.show_website(
-                hold=active, remaining_seconds=seconds, next_boot_setup=next_boot_setup
-            )
+            display.show_website()
         else:
             display.show_status(
                 wifi=status[0],

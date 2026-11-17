@@ -74,7 +74,7 @@ class ReverseTFT:
         self.state = DisplayState(device_id)
         self.group = None
         self._status_labels = None
-        self._website_labels = None
+        self._website_visible = False
 
     @classmethod
     def from_board(cls, device_id):
@@ -89,7 +89,7 @@ class ReverseTFT:
             self.display.root_group = group
             self.group = group
             self._status_labels = None
-            self._website_labels = None
+            self._website_visible = False
 
     def show_boot(self):
         if self.display is None:
@@ -178,29 +178,31 @@ class ReverseTFT:
         except (ImportError, AttributeError, RuntimeError, ValueError):
             return
 
-    def show_website(self, hold=False, remaining_seconds=None, next_boot_setup=False):
+    def show_website(self):
         if self.display is None:
             return
-        hold_text = (format_hold_time(remaining_seconds) if remaining_seconds is not None else "ON") if hold else "OFF"
-        footer = reboot_footer(next_boot_setup, hold)
         try:
-            if self._website_labels is not None and self.display.root_group is self.group:
-                for key, value in (("hold", hold_text), ("footer", footer)):
-                    if self._website_labels[key].text != value:
-                        self._website_labels[key].text = value
+            if self._website_visible and self.display.root_group is self.group:
                 return
             import displayio
             import terminalio
             from adafruit_display_text import label
             matrix = qr_matrix(APP_URL)
             size = len(matrix)
-            scale = max(1, min(3, (self.display.height - 39) // size))
+            scale = max(1, min(3, (self.display.height - 50) // size))
             width = size * scale
-            background = displayio.Bitmap(self.display.width, self.display.height, 1)
-            cream = displayio.Palette(1)
-            cream[0] = 0xF3F4EB
+            background = displayio.Bitmap(self.display.width, self.display.height, 2)
+            colors = displayio.Palette(2)
+            colors[0], colors[1] = 0xF3F4EB, 0x173F35
+            for y in range(32):
+                for x in range(self.display.width):
+                    background[x, y] = 1
             group = displayio.Group()
-            group.append(displayio.TileGrid(background, pixel_shader=cream))
+            group.append(displayio.TileGrid(background, pixel_shader=colors))
+            group.append(label.Label(terminalio.FONT, text="Drawbridge", color=0xF3F4EB,
+                                     scale=2, x=10, y=15))
+            group.append(label.Label(terminalio.FONT, text=self.state.device_id, color=0xF3F4EB,
+                                     x=self.display.width - 44, y=15))
             bitmap = displayio.Bitmap(width, width, 2)
             palette = displayio.Palette(2)
             palette[0], palette[1] = 0xFFFFFF, 0x000000
@@ -210,21 +212,12 @@ class ReverseTFT:
                         for dy in range(scale):
                             for dx in range(scale):
                                 bitmap[x * scale + dx, y * scale + dy] = 1
-            qr_x = self.display.width - width - 4
-            group.append(displayio.TileGrid(bitmap, pixel_shader=palette, x=qr_x, y=17))
+            qr_x = (self.display.width - width) // 2
+            group.append(displayio.TileGrid(bitmap, pixel_shader=palette, x=qr_x, y=50))
             group.append(label.Label(terminalio.FONT, text="Scan to open", color=0x173F35,
-                                     anchor_point=(0.5, 0.5), anchored_position=(qr_x + width // 2, 7)))
-            for text, y, scale in (("Drawbridge", 14, 2), (self.state.device_id, 40, 1),
-                                   ("Hold", 66, 1), ("D0/D1: back", 113, 1)):
-                group.append(label.Label(terminalio.FONT, text=text, color=0x173F35, x=4, y=y, scale=scale))
-            values = {
-                "hold": label.Label(terminalio.FONT, text=hold_text, color=0x173F35, x=4, y=88, scale=2),
-                "footer": label.Label(terminalio.FONT, text=footer, color=0x66736B, x=4, y=128),
-            }
-            for value in values.values():
-                group.append(value)
+                                     anchor_point=(0.5, 0.5), anchored_position=(self.display.width // 2, 41)))
             self._show_group(group)
-            self._website_labels = values
+            self._website_visible = True
         except (ImportError, AttributeError, RuntimeError, ValueError):
             return
 

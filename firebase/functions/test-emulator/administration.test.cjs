@@ -53,6 +53,7 @@ test("device authentication is scoped, revocable, rate limited, and manifests ex
   await ref.set({enabled: true, otaCredentialHash: hash(token), allowedUsers: ["private"]});
   for (const bad of ["", "bad", "a".repeat(64)]) await assert.rejects(service.authorize(f.id, bad, "manifest"), {publicCode: "unauthenticated"});
   const device = await service.authorize(f.id, token, "manifest");
+  assert.equal((await ref.get()).data().lastSeenAtMs, f.time);
   assert.equal(await service.manifest(device), null);
   await assert.rejects(service.authorize(f.id, token, "manifest"), {publicCode: "resource-exhausted"});
   await assert.rejects(service.authorize("other-device", token, "manifest"), {publicCode: "unauthenticated"});
@@ -68,4 +69,33 @@ test("device authentication is scoped, revocable, rate limited, and manifests ex
   await assert.rejects(service.report(f.id, {state: "current", version: "bad", sequence: 0}), {publicCode: "invalid-argument"});
   await ref.update({enabled: false});
   await assert.rejects(service.authorize(f.id, token, "report"), {publicCode: "unauthenticated"});
+});
+
+
+test("device observation persists authenticated contact and version reports without exposing private fields", async () => {
+  const f = await fixture(), ref = db.doc("devices/" + f.id), token = randomBytes(32).toString("hex");
+  let time = f.time;
+  const service = createDeviceService(db, () => time);
+  await ref.set({enabled: true, otaCredentialHash: hash(token), allowedUsers: ["private-user"],
+    maintenance: {appVersion: "1.0.1", baseVersion: "1.0.13", lastSeenAtMs: time - 100, supportsRestartSetup: true}});
+  await service.authorize(f.id, token, "manifest");
+  assert.equal((await ref.get()).data().lastSeenAtMs, time);
+  time += 1000;
+  await service.report(f.id, {version: "1.0.9", state: "current", sequence: 0});
+  assert.equal((await ref.get()).data().lastSeenAtMs, time);
+  const getView = async () => (await f.admin.overview(f.request({}))).devices.find(d => d.id === f.id);
+  let view = await getView();
+  assert.deepEqual(view.observation, {lastSeenAtMs: time, appVersion: "1.0.9", baseVersion: null, reportedAtMs: time});
+  time += 10001;
+  await service.authorize(f.id, token, "manifest");
+  view = await getView();
+  assert.equal(view.observation.lastSeenAtMs, time);
+  assert.equal(view.observation.reportedAtMs, time - 10001);
+  assert.equal(JSON.stringify(view).includes("private-user"), false);
+  assert.equal(JSON.stringify(view).includes(hash(token)), false);
+  const stored = (await ref.get()).data();
+  time += 10001;
+  await assert.rejects(service.authorize(f.id, "a".repeat(64), "manifest"));
+  await assert.rejects(service.report(f.id, {version: "invalid", state: "current", sequence: 0}));
+  assert.deepEqual((await ref.get()).data(), stored);
 });

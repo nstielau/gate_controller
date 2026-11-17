@@ -53,23 +53,34 @@ class DisplayTests(unittest.TestCase):
             self.assertEqual(bitmap.call_count, 2)
             self.assertIn("1:00:00", [item.text for item in display.root_group if hasattr(item, "text")])
 
-    def test_website_qr_has_no_pairing_intent_and_keeps_live_footer(self):
+    def test_website_qr_keeps_dark_header_and_uses_lower_screen_without_hold_or_d2(self):
         display = SimpleNamespace(width=240, height=135, root_group=None)
         labels = MagicMock(side_effect=lambda font, **kwargs: SimpleNamespace(**kwargs))
-        bitmap = MagicMock(side_effect=lambda *args: {})
-        drawing = SimpleNamespace(Group=list, Bitmap=bitmap, Palette=lambda *args: {}, TileGrid=MagicMock())
+        bitmaps = []
+        def bitmap(*args):
+            result = {}
+            bitmaps.append((args, result))
+            return result
+        tiles = MagicMock(return_value=SimpleNamespace())
+        drawing = SimpleNamespace(Group=list, Bitmap=bitmap, Palette=lambda *args: {}, TileGrid=tiles)
         text = SimpleNamespace(label=SimpleNamespace(Label=labels))
         renderer = module.ReverseTFT(display, "ab12cd")
-        with patch.dict(sys.modules, {"displayio": drawing, "terminalio": SimpleNamespace(FONT=None), "adafruit_display_text": text}), patch.object(module, "qr_matrix", return_value=[[False]*41 for _ in range(41)]) as qr:
-            renderer.show_website(hold=True, remaining_seconds=65, next_boot_setup=False)
+        with patch.dict(sys.modules, {"displayio": drawing, "terminalio": SimpleNamespace(FONT=None), "adafruit_display_text": text}), patch.object(module, "qr_matrix", return_value=[[False]*37 for _ in range(37)]) as qr:
+            renderer.show_website()
             group = display.root_group
-            renderer.show_website(hold=True, remaining_seconds=64, next_boot_setup=True)
+            renderer.show_website()
             self.assertIs(display.root_group, group)
             qr.assert_called_once_with(module.APP_URL)
             strings = [item.text for item in group if hasattr(item, "text")]
-            self.assertIn("01:04", strings)
-            self.assertIn("Reboot: Wi-Fi setup (D2) | ends hold", strings)
-            self.assertIn("Scan to open", strings)
+            self.assertEqual(set(strings), {"Drawbridge", "ab12cd", "Scan to open"})
+            header = next(item for item in group if getattr(item,"text",None)=="Drawbridge")
+            self.assertEqual((header.x,header.y,header.scale,header.color),(10,15,2,0xF3F4EB))
+            self.assertTrue(all(bitmaps[0][1][x,y] == 1 for x in range(240) for y in range(32)))
+            qr_tile = tiles.call_args_list[-1].kwargs
+            width = bitmaps[-1][0][0]
+            self.assertEqual(qr_tile["x"], (240-width)//2)
+            self.assertGreaterEqual(qr_tile["y"], 48)
+            self.assertLessEqual(qr_tile["y"]+width,135)
             renderer.show_status(next_boot_setup=True)
             self.assertIsNot(display.root_group, group)
 
